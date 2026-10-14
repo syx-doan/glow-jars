@@ -1,0 +1,26 @@
+{
+  "name": "glow-jars",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:run": "npm run android:sync && npx cap run android"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "@capacitor-community/admob": "^6.2.0",
+    "@capacitor-firebase/analytics": "^6.3.1",
+    "@capacitor-firebase/remote-config": "^6.3.1",
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/cli": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
+    "firebase": "^11.10.0"
+  }
+}

@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#07060f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Glow Jars</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="frame">
+      <div id="home" class="screen active">
+        <div class="sky" aria-hidden="true"></div>
+        <div class="aurora" aria-hidden="true"></div>
+        <div class="spark-field" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <header class="topbar">
+          <button class="ghost" id="btn-settings" type="button" data-i18n="settings">Settings</button>
+          <div class="coins" id="home-coins">0</div>
+        </header>
+        <div class="hero">
+          <div class="hero-stage" aria-hidden="true">
+            <div class="moon"></div>
+            <div class="halo"></div>
+            <svg class="hero-svg" viewBox="0 0 160 220" fill="none">
+              <ellipse cx="80" cy="206" rx="48" ry="8" fill="#e4c27a" opacity="0.18"/>
+              <rect x="58" y="18" width="44" height="14" rx="4" fill="url(#hero-lid)"/>
+              <rect x="52" y="28" width="56" height="8" rx="3" fill="#c9a056"/>
+              <path d="M48 44c0-8 8-12 32-12s32 4 32 12v118c0 22-14 36-32 36s-32-14-32-36V44z" fill="url(#hero-glass)" stroke="#e4c27a" stroke-width="2.2"/>
+              <circle cx="80" cy="154" r="16" fill="url(#hero-rose)"/>
+              <circle cx="80" cy="116" r="16" fill="url(#hero-mint)"/>
+              <circle cx="80" cy="78" r="16" fill="url(#hero-gold)"/>
+              <path d="M58 52c4-16 14-22 22-22" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
+              <defs>
+                <linearGradient id="hero-lid" x1="58" y1="18" x2="102" y2="32">
+                  <stop stop-color="#fff3c4"/>
+                  <stop offset="1" stop-color="#c4923a"/>
+                </linearGradient>
+                <linearGradient id="hero-glass" x1="48" y1="32" x2="112" y2="200">
+                  <stop stop-color="#2a2440" stop-opacity="0.55"/>
+                  <stop offset="1" stop-color="#0c0a16" stop-opacity="0.35"/>
+                </linearGradient>
+                <radialGradient id="hero-gold" cx="38%" cy="32%" r="70%">
+                  <stop stop-color="#fff3c4"/>
+                  <stop offset="0.5" stop-color="#ffd166"/>
+                  <stop offset="1" stop-color="#e09a20"/>
+                </radialGradient>
+                <radialGradient id="hero-mint" cx="38%" cy="32%" r="70%">
+                  <stop stop-color="#e8fff8"/>
+                  <stop offset="0.5" stop-color="#7ee0c6"/>
+                  <stop offset="1" stop-color="#2aa889"/>
+                </radialGradient>
+                <radialGradient id="hero-rose" cx="38%" cy="32%" r="70%">
+                  <stop stop-color="#ffd0da"/>
+                  <stop offset="0.5" stop-color="#ff5d7a"/>
+                  <stop offset="1" stop-color="#c4234a"/>
+                </radialGradient>
+              </defs>
+            </svg>
+            <div class="fireflies">
+              <i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+          <div class="brand">
+            <p class="eyebrow" data-i18n="eyebrow">Night of glowing jars</p>
+            <h1>GLOW JARS</h1>
+            <p class="tagline" data-i18n="tagline">Sort orbs · crack ice · reveal gems</p>
+          </div>
+        </div>
+        <div class="home-stats">
+          <div class="stat">
+            <b id="home-level">1</b>
+            <span data-i18n="currentLevel">Current level</span>
+          </div>
+          <div class="stat">
+            <b id="home-stars">0</b>
+            <span data-i18n="stars">Stars</span>
+          </div>
+          <div class="stat">
+            <b id="home-cleared">0</b>
+            <span data-i18n="cleared">Cleared</span>
+          </div>
+        </div>
+        <div class="constellation" id="constellation">
+          <div class="constellation-head">
+            <div>
+              <p class="constellation-kicker" data-i18n="allGame">Whole game</p>
+              <p class="constellation-name" id="levels-count-label">80 levels</p>
+            </div>
+            <p class="constellation-progress" id="constellation-progress">Cleared 0/80</p>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <i id="progress-fill"></i>
+          </div>
+          <p class="chapter-label" id="constellation-range">Current group · levels 1–10 · Pink Ray</p>
+          <div class="dots" id="constellation-dots"></div>
+        </div>
+        <div class="home-actions">
+          <button class="primary home-play" id="btn-play" type="button">Continue</button>
+          <button class="secondary" id="btn-levels" type="button" data-i18n="chooseLevels">Choose level</button>
+        </div>
+      </div>
+
+      <div id="levels" class="screen">
+        <header class="topbar">
+          <button class="ghost" id="btn-levels-back" type="button" data-i18n="home">Home</button>
+          <h2 id="levels-title">80 levels</h2>
+          <div class="coins" id="levels-coins">0</div>
+        </header>
+        <div class="level-grid" id="level-grid"></div>
+      </div>
+
+      <div id="play" class="screen">
+        <header class="topbar playbar">
+          <button class="ghost" id="btn-play-back" type="button" data-i18n="exit">Exit</button>
+          <div class="level-label" id="play-level">Level 1</div>
+          <div class="coins" id="play-coins">0</div>
+        </header>
+        <div class="play-meta">
+          <span class="chip" id="mod-chip">First rhythm</span>
+          <span class="chip moves" id="move-chip">Moves 12</span>
+          <span class="chip combo hidden" id="combo-chip">Combo x1</span>
+        </div>
+        <p class="tutorial" id="tutorial">Tap or drag an orb onto another jar</p>
+        <canvas id="board"></canvas>
+        <div class="hud" id="hud">
+          <button class="tool" id="btn-undo" type="button" data-i18n-html="undo">
+            Undo <span id="undo-left">5</span>
+          </button>
+          <button class="tool" id="btn-hint" type="button" data-i18n="hint">Hint</button>
+          <button class="tool" id="btn-extra" type="button" data-i18n="extraJar">+ Jar</button>
+          <button class="tool" id="btn-moves" type="button" data-i18n="plusMoves">+5 moves</button>
+        </div>
+        <div id="coach" class="coach hidden" aria-live="polite">
+          <div class="coach-dim" id="coach-dim"></div>
+          <div class="coach-spot" id="coach-spot"></div>
+          <div class="coach-spot" id="coach-spot-b"></div>
+          <div class="coach-card bottom" id="coach-card">
+            <p class="coach-kicker" id="coach-step">1/4</p>
+            <h3 id="coach-title" data-i18n="coachTitle">Guide</h3>
+            <p id="coach-body" data-i18n="coachBody">Tap the top orb to pick it up.</p>
+            <div class="coach-actions">
+              <button class="ghost" id="btn-coach-skip" type="button" data-i18n="skip">Skip</button>
+              <button class="primary" id="btn-coach-next" type="button" data-i18n="next">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="settings" class="screen">
+        <header class="topbar">
+          <button class="ghost" id="btn-settings-back" type="button" data-i18n="done">Done</button>
+          <h2 data-i18n="settings">Settings</h2>
+          <span></span>
+        </header>
+        <div class="settings-list">
+          <label class="row-toggle">
+            <span data-i18n="sound">Sound</span>
+            <input id="toggle-sound" type="checkbox" checked />
+          </label>
+          <label class="row-toggle">
+            <span data-i18n="haptic">Haptics</span>
+            <input id="toggle-haptic" type="checkbox" checked />
+          </label>
+          <div class="row-toggle lang-row">
+            <span data-i18n="language">Language</span>
+            <div class="lang-switch" role="group" aria-label="Language">
+              <button class="lang-btn active" id="btn-lang-en" type="button" data-lang="en">EN</button>
+              <button class="lang-btn" id="btn-lang-vi" type="button" data-lang="vi">VI</button>
+            </div>
+          </div>
+          <button class="secondary" id="btn-replay-guide" type="button" data-i18n="replayGuide">Replay tutorial</button>
+          <button class="secondary hidden" id="btn-privacy" type="button" data-i18n="privacyOptions">Privacy &amp; ad choices</button>
+          <button class="danger" id="btn-reset" type="button" data-i18n="resetProgress">Reset progress</button>
+          <p class="fineprint" data-i18n="fineprint">
+            Glow Jars is free with ads. Watch an optional ad for hints, jars, moves or double coins.
+          </p>
+        </div>
+      </div>
+
+      <div id="win" class="modal hidden">
+        <div class="modal-card">
+          <p class="eyebrow" data-i18n="complete">COMPLETE</p>
+          <h2 id="win-title">Level 1</h2>
+          <div class="stars" id="win-stars"></div>
+          <p class="reward" id="win-reward">+0 coins</p>
+          <p class="win-note" id="win-note"></p>
+          <button class="reward-btn hidden" id="btn-win-double" type="button">▶ +0 coins</button>
+          <div class="modal-actions">
+            <button class="secondary" id="btn-win-levels" type="button" data-i18n="levelsBtn">Levels</button>
+            <button class="primary" id="btn-win-next" type="button" data-i18n="nextLevel">Next level</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="outmoves" class="modal hidden">
+        <div class="modal-card">
+          <p class="eyebrow" data-i18n="omKicker">OUT OF MOVES</p>
+          <h2 data-i18n="omTitle">Keep going?</h2>
+          <p class="win-note" data-i18n="omBody">Get 5 more moves and finish this level.</p>
+          <button class="reward-btn" id="btn-om-ad" type="button" data-i18n="omAd">▶ Watch ad: +5 moves</button>
+          <button class="primary om-coins" id="btn-om-coins" type="button">50 coins: +5 moves</button>
+          <div class="modal-actions">
+            <button class="secondary" id="btn-om-retry" type="button" data-i18n="omRetry">Restart</button>
+            <button class="ghost" id="btn-om-close" type="button" data-i18n="omClose">Not now</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="ad" class="modal hidden">
+        <div class="modal-card ad-card">
+          <p class="eyebrow" id="ad-kind">ADS</p>
+          <h2 id="ad-title">Ad</h2>
+          <p id="ad-body">Ad content</p>
+          <div class="ad-timer" id="ad-timer"></div>
+          <button class="primary" id="btn-ad-done" type="button" disabled>Watching…</button>
+        </div>
+      </div>
+
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

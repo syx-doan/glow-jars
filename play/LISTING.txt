@@ -1,0 +1,19 @@
+Google Play graphic assets
+
+Required
+• Hi-res icon 512×512 → play/icon-512.png
+• Feature graphic 1024×500 → play/feature.png
+• Phone screenshots 1080×1920 (real device captures, cropped to ≤2:1)
+  - phone-01.png  Home
+  - phone-02.png  Gameplay (level 18)
+  - phone-03.png  Level select
+  - phone-04.png  Early gameplay
+
+Optional
+• 7-inch tablet 1200×1920 → play/tablet-7/
+• 10-inch tablet 1920×1200 → play/tablet-10/
+
+Raw captures (1080×2640 Flip3) kept in play/raw/
+
+Rebuild store crops from raw:
+  python3 scripts/process-play-screenshots.py

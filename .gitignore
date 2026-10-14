@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / local config
+.env
+.env.*
+*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+android/app/src/main/assets/public/
+*.apk
+*.aab
+*.aar
+
+# Signing secrets
+android/keystore.properties
+android/keystore/
+*.jks
+*.keystore
+
+# Firebase config
+google-services.json
+
+# Archives
+*.zip
