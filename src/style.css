@@ -69,11 +69,11 @@ button {
 #play.screen {
   padding-bottom: calc(18px + var(--safe-bottom) + var(--banner-h, 0px));
   background:
-    radial-gradient(70% 45% at 50% 48%, rgba(150, 120, 255, 0.26), transparent 72%),
-    radial-gradient(90% 40% at 50% -6%, rgba(122, 70, 190, 0.6), transparent 70%),
-    radial-gradient(60% 34% at -8% 78%, rgba(46, 233, 166, 0.2), transparent 70%),
-    radial-gradient(60% 34% at 108% 70%, rgba(255, 93, 122, 0.18), transparent 70%),
-    linear-gradient(180deg, #1d1638 0%, #171230 48%, #10142a 100%);
+    radial-gradient(70% 45% at 50% 48%, rgba(150, 120, 255, 0.13), transparent 72%),
+    radial-gradient(90% 40% at 50% -6%, rgba(122, 70, 190, 0.36), transparent 70%),
+    radial-gradient(60% 34% at -8% 78%, rgba(46, 233, 166, 0.1), transparent 70%),
+    radial-gradient(60% 34% at 108% 70%, rgba(255, 93, 122, 0.09), transparent 70%),
+    linear-gradient(180deg, #171230 0%, #120f26 48%, #0c1022 100%);
   isolation: isolate;
 }
 
@@ -84,10 +84,11 @@ button {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(ellipse at 50% 12%, rgba(126, 224, 198, 0.16), transparent 50%),
-    radial-gradient(ellipse at 18% 34%, rgba(199, 125, 255, 0.16), transparent 46%),
-    radial-gradient(ellipse at 84% 26%, rgba(255, 209, 102, 0.12), transparent 44%);
-  animation: aurora 9s ease-in-out infinite alternate;
+    radial-gradient(ellipse at 50% 12%, rgba(126, 224, 198, 0.09), transparent 50%),
+    radial-gradient(ellipse at 18% 34%, rgba(199, 125, 255, 0.09), transparent 46%),
+    radial-gradient(ellipse at 84% 26%, rgba(255, 209, 102, 0.06), transparent 44%);
+  animation: aurora 14s ease-in-out infinite alternate;
+  will-change: transform;
 }
 
 #play.screen.flash::after {
@@ -95,8 +96,8 @@ button {
   pointer-events: none;
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 50%, var(--flash, rgba(255, 255, 255, 0.35)), transparent 70%);
-  animation: screen-flash 520ms ease-out forwards;
+  background: radial-gradient(circle at 50% 50%, var(--flash, rgba(255, 255, 255, 0.2)), transparent 65%);
+  animation: screen-flash 420ms ease-out forwards;
 }
 
 @keyframes screen-flash {
@@ -133,11 +134,11 @@ button {
   inset: -18% -30% auto;
   height: 52%;
   background:
-    radial-gradient(ellipse at 50% 10%, rgba(126, 224, 198, 0.28), transparent 58%),
-    radial-gradient(ellipse at 12% 40%, rgba(199, 125, 255, 0.26), transparent 52%),
-    radial-gradient(ellipse at 88% 28%, rgba(255, 93, 122, 0.22), transparent 50%);
-  filter: blur(14px);
-  animation: aurora 8s ease-in-out infinite alternate;
+    radial-gradient(ellipse at 50% 10%, rgba(126, 224, 198, 0.18), transparent 64%),
+    radial-gradient(ellipse at 12% 40%, rgba(199, 125, 255, 0.16), transparent 60%),
+    radial-gradient(ellipse at 88% 28%, rgba(255, 93, 122, 0.13), transparent 58%);
+  animation: aurora 12s ease-in-out infinite alternate;
+  will-change: transform;
 }
 
 .spark-field {
@@ -154,8 +155,10 @@ button {
   border-radius: 50%;
   background: #fff6d8;
   box-shadow: 0 0 10px #e4c27a;
+  top: 88%;
   opacity: 0;
   animation: spark-rise 6.5s linear infinite;
+  will-change: transform, opacity;
 }
 
 .spark-field i:nth-child(1) { left: 12%; animation-delay: 0s; }
@@ -168,9 +171,9 @@ button {
 .spark-field i:nth-child(8) { left: 70%; animation-delay: 4.8s; background: #c77dff; }
 
 @keyframes spark-rise {
-  0% { top: 88%; opacity: 0; transform: scale(0.4); }
-  12% { opacity: 0.9; }
-  100% { top: 8%; opacity: 0; transform: scale(1.1); }
+  0% { opacity: 0; transform: translateY(0) scale(0.4); }
+  12% { opacity: 0.75; }
+  100% { opacity: 0; transform: translateY(-80vh) scale(1.1); }
 }
 
 @keyframes twinkle {
@@ -179,8 +182,8 @@ button {
 }
 
 @keyframes aurora {
-  from { transform: translateY(0) scale(1); opacity: 0.75; }
-  to { transform: translateY(14px) scale(1.08); opacity: 1; }
+  from { transform: translateY(0) scale(1); }
+  to { transform: translateY(12px) scale(1.06); }
 }
 
 .hero {
@@ -735,6 +738,37 @@ html[lang="vi"] .coins::before {
   background: rgba(255, 255, 255, 0.07);
 }
 
+/* Price tag on rescue tools: free count, coin price, or ▶ when an ad pays instead. */
+.tool .cost {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tool .cost.coin {
+  color: var(--gold);
+  background: rgba(228, 194, 122, 0.16);
+}
+
+.tool .cost.ad {
+  color: #10221c;
+  background: var(--mint);
+}
+
+.tool .cost.short {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.14);
+}
+
+.tool .cost:empty {
+  display: none;
+}
+
 .tool:active,
 .tool.pressing {
   transform: translateY(2px) scale(0.94);
@@ -942,6 +976,11 @@ button:disabled.pressing {
 
 .reward-btn.hidden {
   display: none;
+}
+
+.home-actions .reward-btn {
+  margin-top: 0;
+  padding: 12px 14px;
 }
 
 .om-coins {
@@ -1406,5 +1445,47 @@ button:disabled.pressing {
 
   .coach-card.bottom {
     bottom: calc(16px + var(--safe-bottom) + var(--banner-h, 0px));
+  }
+}
+
+/* ---------- Effects profiles (html[data-fx] set by perf.ts) ---------- */
+/* Low-end devices and "Reduce effects": static backdrop, no decorative loops. */
+html[data-fx="low"] .aurora,
+html[data-fx="low"] #play.screen::before,
+html[data-fx="low"] .sky,
+html[data-fx="low"] .halo,
+html[data-fx="low"] .hero-stage,
+html[data-fx="low"] .fireflies i,
+html[data-fx="low"] .home-play,
+html[data-fx="low"] .dots span.play {
+  animation: none;
+  will-change: auto;
+}
+
+html[data-fx="low"] .spark-field,
+html[data-fx="low"] #play.screen.flash::after {
+  display: none;
+}
+
+html[data-fx="low"] .fireflies i,
+html[data-fx="low"] .spark-field i {
+  box-shadow: none;
+}
+
+html[data-fx="low"] .hero-svg,
+html[data-fx="low"] .brand h1 {
+  filter: none;
+}
+
+html[data-fx="mid"] .spark-field i:nth-child(n + 5) {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

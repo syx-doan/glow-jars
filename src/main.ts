@@ -1,5 +1,6 @@
 import {
   bindAds,
+  coinAdConfig,
   doubleCoinsEnabled,
   initAds,
   maybeInterstitial,
@@ -8,9 +9,11 @@ import {
   privacyOptionsRequired,
   setPlayBanner,
   showRewarded,
+  winAdMultiplier,
   type RewardOutcome,
 } from "./ads";
 import { track } from "./analytics";
+import { fx, setReducedEffects } from "./perf";
 import { sfx, setMuted, unlockAudio } from "./audio";
 import {
   addExtraJar,
@@ -27,6 +30,7 @@ import {
   topValue,
   undoMove,
 } from "./engine";
+import { levelReward, PRICE, todayKey, type Tool } from "./economy";
 import { cloneLevel, modifierHint, modifierTitle, specForLevel } from "./generator";
 import {
   applyStaticI18n,
@@ -37,7 +41,7 @@ import {
   type Locale,
 } from "./i18n";
 import { Board } from "./render";
-import { coinReward, loadSave, resetSave, starsFor, writeSave } from "./save";
+import { loadSave, resetSave, starsFor, writeSave } from "./save";
 import {
   allowedJar,
   buildLesson,
@@ -56,8 +60,6 @@ import {
   type PlayStats,
   type SaveData,
 } from "./types";
-
-const MOVES_COST = 50;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -109,6 +111,7 @@ function haptic(ms: number | number[] = 12): void {
 }
 
 function screenFlash(color: string): void {
+  if (!fx().screenFlash) return;
   const el = $("play");
   el.style.setProperty("--flash", color);
   el.classList.remove("flash");
@@ -147,6 +150,65 @@ function refreshCoins(): void {
   $("home-coins").textContent = String(save.coins);
   $("levels-coins").textContent = String(save.coins);
   $("play-coins").textContent = String(save.coins);
+  refreshToolCosts();
+  refreshFreeCoins();
+}
+
+function earnCoins(n: number, source: string): void {
+  if (n <= 0) return;
+  save.coins += n;
+  persist();
+  track("earn_virtual_currency", { virtual_currency_name: "coins", value: n, source });
+}
+
+function spendCoins(n: number, item: string): boolean {
+  if (save.coins < n) return false;
+  save.coins -= n;
+  persist();
+  track("spend_virtual_currency", { virtual_currency_name: "coins", value: n, item_name: item });
+  return true;
+}
+
+/** Spends coins when affordable, otherwise offers a rewarded ad for the tool. */
+async function payForTool(tool: Tool, reason: string, placement: string): Promise<boolean> {
+  if (spendCoins(PRICE[tool], tool)) return true;
+  busy = true;
+  const outcome = await showRewarded(reason, placement);
+  busy = false;
+  if (outcome === "granted") return true;
+  toastMissedReward(outcome);
+  return false;
+}
+
+function setCost(id: string, text: string, kind: "" | "coin" | "ad" | "short"): void {
+  const el = $(id);
+  el.textContent = text;
+  el.className = kind ? `cost ${kind}` : "cost";
+}
+
+function refreshToolCosts(): void {
+  const free = UNDO_FREE - stats.undos;
+  if (free > 0) setCost("cost-undo", String(free), "");
+  else setCost("cost-undo", String(PRICE.undo), save.coins >= PRICE.undo ? "coin" : "short");
+  for (const tool of ["hint", "jar", "moves"] as const) {
+    const id = `cost-${tool}`;
+    if (save.coins >= PRICE[tool]) setCost(id, String(PRICE[tool]), "coin");
+    else setCost(id, "▶", "ad");
+  }
+}
+
+function coinAdsLeft(): number {
+  const { daily } = coinAdConfig();
+  return save.coinAdDay === todayKey() ? Math.max(0, daily - save.coinAdCount) : daily;
+}
+
+function refreshFreeCoins(): void {
+  const btn = $("btn-free-coins") as HTMLButtonElement;
+  const { enabled, reward, daily } = coinAdConfig();
+  btn.classList.toggle("hidden", !enabled || daily <= 0);
+  const left = coinAdsLeft();
+  btn.disabled = left <= 0;
+  btn.textContent = left > 0 ? t("freeCoins", { n: reward, left, max: daily }) : t("freeCoinsDone");
 }
 
 function remainingMoves(): number {
@@ -288,7 +350,7 @@ function refreshHud(): void {
   const comboChip = $("combo-chip");
   comboChip.textContent = t("combo", { n: combo });
   comboChip.classList.toggle("hidden", combo < 2);
-  $("undo-left").textContent = String(Math.max(0, UNDO_FREE - stats.undos));
+  refreshToolCosts();
 }
 
 function currentConstellation(): number {
@@ -449,7 +511,7 @@ async function tryPour(from: number, to: number): Promise<void> {
       }
     }
     haptic(combo >= 2 ? [20, 40, 30, 40, 45] : [18, 30, 28]);
-    screenFlash(combo >= 3 ? "rgba(255, 209, 102, 0.4)" : "rgba(190, 170, 255, 0.28)");
+    screenFlash(combo >= 3 ? "rgba(255, 209, 102, 0.2)" : "rgba(190, 170, 255, 0.13)");
   } else {
     poursSinceSeal += 1;
     if (poursSinceSeal >= 2) combo = 0;
@@ -473,8 +535,8 @@ function openOutOfMoves(): void {
   selected = null;
   board.setSelected(null);
   const coinsBtn = $("btn-om-coins") as HTMLButtonElement;
-  coinsBtn.textContent = t("omCoins", { n: MOVES_COST });
-  coinsBtn.disabled = save.coins < MOVES_COST;
+  coinsBtn.textContent = t("omCoins", { n: PRICE.moves });
+  coinsBtn.disabled = save.coins < PRICE.moves;
   outModal.classList.remove("hidden");
   track("out_of_moves", { level: levelId });
 }
@@ -493,14 +555,14 @@ async function onWin(): Promise<void> {
   sfx.win();
   board.celebrate();
   haptic([30, 50, 30, 50, 80]);
-  screenFlash("rgba(255, 230, 150, 0.45)");
-  const first = (save.stars[levelId - 1] ?? 0) === 0;
-  const stars = starsFor({ ...stats, limit: spec.moveLimit });
-  const reward = coinReward(stars, first, stats.comboMax);
-  save.coins += reward;
-  save.stars[levelId - 1] = Math.max(save.stars[levelId - 1] ?? 0, stars);
+  screenFlash("rgba(255, 230, 150, 0.22)");
+  const prevStars = save.stars[levelId - 1] ?? 0;
+  const stars = starsFor(stats);
+  const reward = levelReward(levelId, prevStars, stars, stats.comboMax);
+  save.stars[levelId - 1] = Math.max(prevStars, stars);
   save.maxUnlocked = Math.max(save.maxUnlocked, Math.min(LEVEL_COUNT, levelId + 1));
   persist();
+  earnCoins(reward, prevStars > 0 ? "replay" : "level_clear");
   noteLevelCleared();
   track("level_end", { level: levelId, success: true, stars, moves: stats.moves });
   winReward = reward;
@@ -511,7 +573,8 @@ async function onWin(): Promise<void> {
     .join("");
   $("win-reward").textContent = t("coinsReward", { n: 0 });
   const doubleBtn = $("btn-win-double") as HTMLButtonElement;
-  doubleBtn.textContent = t("winDouble", { n: reward });
+  const multi = winAdMultiplier();
+  doubleBtn.textContent = t("winDouble", { x: multi, n: reward * (multi - 1) });
   doubleBtn.disabled = false;
   doubleBtn.classList.toggle("hidden", !doubleCoinsEnabled() || reward <= 0);
   $("win-note").textContent =
@@ -521,7 +584,8 @@ async function onWin(): Promise<void> {
   $("btn-win-next").textContent = levelId >= LEVEL_COUNT ? t("homeBtn") : t("nextLevel");
   await new Promise((r) => setTimeout(r, 950));
   winModal.classList.remove("hidden");
-  countUpReward(0, reward, 500);
+  if (reward > 0) countUpReward(0, reward, 500);
+  else $("win-reward").textContent = t("winReplay");
   busy = false;
 }
 
@@ -655,6 +719,7 @@ $("btn-play-back").addEventListener("click", () => {
 $("btn-settings").addEventListener("click", () => {
   ($("toggle-sound") as HTMLInputElement).checked = save.sound;
   ($("toggle-haptic") as HTMLInputElement).checked = save.haptic;
+  ($("toggle-lowfx") as HTMLInputElement).checked = save.lowFx;
   syncLangButtons();
   $("btn-privacy").classList.toggle("hidden", !privacyOptionsRequired());
   showScreen("settings");
@@ -671,15 +736,25 @@ $("toggle-sound").addEventListener("change", (e) => {
   setMuted(!save.sound);
   persist();
 });
+$("toggle-lowfx").addEventListener("change", (e) => {
+  save.lowFx = (e.target as HTMLInputElement).checked;
+  setReducedEffects(save.lowFx);
+  persist();
+  track("fx_reduce", { on: save.lowFx });
+});
 $("toggle-haptic").addEventListener("change", (e) => {
   save.haptic = (e.target as HTMLInputElement).checked;
   persist();
 });
 $("btn-reset").addEventListener("click", () => {
   if (!confirm(t("resetConfirm"))) return;
-  const locale = save.locale;
+  const { locale, lowFx, coinAdDay, coinAdCount } = save;
   save = resetSave();
   save.locale = locale;
+  save.lowFx = lowFx;
+  // Keep today's ad allowance so a reset can't refill it.
+  save.coinAdDay = coinAdDay;
+  save.coinAdCount = coinAdCount;
   persist();
   setMuted(!save.sound);
   hideCoach(false);
@@ -696,13 +771,9 @@ $("btn-replay-guide").addEventListener("click", () => {
 $("btn-undo").addEventListener("click", () => {
   if (coach || busy || !history.length) return;
   const needCoins = UNDO_FREE - stats.undos <= 0;
-  if (needCoins && save.coins < 15) {
+  if (needCoins && !spendCoins(PRICE.undo, "undo")) {
     sfx.error();
     return;
-  }
-  if (needCoins) {
-    save.coins -= 15;
-    persist();
   }
   const move = history.pop()!;
   undoMove(state, move);
@@ -717,19 +788,13 @@ $("btn-undo").addEventListener("click", () => {
 
 $("btn-hint").addEventListener("click", async () => {
   if (coach || busy) return;
-  const useAd = save.coins < 40;
-  if (useAd) {
-    const outcome = await showRewarded(t("rewardHint"), "hint");
-    if (outcome !== "granted") return toastMissedReward(outcome);
-  } else {
-    save.coins -= 40;
-    persist();
-  }
+  // Check before charging so a dead end never costs coins or an ad.
   const move = hintMove(state);
   if (!move) {
     sfx.error();
     return;
   }
+  if (!(await payForTool("hint", t("rewardHint"), "hint"))) return;
   stats.hints += 1;
   board.setHint(move);
   sfx.coin();
@@ -737,14 +802,7 @@ $("btn-hint").addEventListener("click", async () => {
 
 $("btn-extra").addEventListener("click", async () => {
   if (coach || busy || stats.extraJar) return;
-  const useAd = save.coins < 80;
-  if (useAd) {
-    const outcome = await showRewarded(t("rewardJar"), "extra_jar");
-    if (outcome !== "granted") return toastMissedReward(outcome);
-  } else {
-    save.coins -= 80;
-    persist();
-  }
+  if (!(await payForTool("jar", t("rewardJar"), "extra_jar"))) return;
   state = addExtraJar(state);
   stats.extraJar = true;
   $("btn-extra").toggleAttribute("disabled", true);
@@ -754,14 +812,7 @@ $("btn-extra").addEventListener("click", async () => {
 
 $("btn-moves").addEventListener("click", async () => {
   if (coach || busy) return;
-  const useAd = save.coins < MOVES_COST;
-  if (useAd) {
-    const outcome = await showRewarded(t("rewardMoves"), "moves");
-    if (outcome !== "granted") return toastMissedReward(outcome);
-  } else {
-    save.coins -= MOVES_COST;
-    persist();
-  }
+  if (!(await payForTool("moves", t("rewardMoves"), "moves"))) return;
   grantMoves();
 });
 
@@ -776,9 +827,7 @@ $("btn-om-ad").addEventListener("click", async () => {
   grantMoves();
 });
 $("btn-om-coins").addEventListener("click", () => {
-  if (save.coins < MOVES_COST) return;
-  save.coins -= MOVES_COST;
-  persist();
+  if (!spendCoins(PRICE.moves, "moves")) return;
   outModal.classList.add("hidden");
   grantMoves();
 });
@@ -793,18 +842,36 @@ $("btn-win-double").addEventListener("click", async () => {
   if (winBusy || btn.disabled) return;
   winBusy = true;
   btn.disabled = true;
-  const outcome = await showRewarded(t("rewardDouble", { n: winReward }), "double_coins");
+  const bonus = winReward * (winAdMultiplier() - 1);
+  const outcome = await showRewarded(t("rewardDouble", { n: bonus }), "double_coins");
   winBusy = false;
   if (outcome !== "granted") {
     btn.disabled = false;
     return toastMissedReward(outcome);
   }
-  save.coins += winReward;
-  persist();
-  countUpReward(winReward, winReward * 2);
+  earnCoins(bonus, "win_ad");
+  countUpReward(winReward, winReward + bonus);
   btn.classList.add("hidden");
   board.celebrate();
   haptic([20, 40, 30]);
+});
+$("btn-free-coins").addEventListener("click", async () => {
+  const btn = $("btn-free-coins") as HTMLButtonElement;
+  const { enabled, reward } = coinAdConfig();
+  if (btn.disabled || !enabled || coinAdsLeft() <= 0) return refreshFreeCoins();
+  btn.disabled = true;
+  const outcome = await showRewarded(t("rewardCoins", { n: reward }), "free_coins");
+  if (outcome !== "granted") {
+    refreshFreeCoins();
+    return toastMissedReward(outcome);
+  }
+  const day = todayKey();
+  save.coinAdCount = save.coinAdDay === day ? save.coinAdCount + 1 : 1;
+  save.coinAdDay = day;
+  earnCoins(reward, "free_coins_ad");
+  sfx.coin();
+  haptic([20, 40, 30]);
+  toast(t("coinsReward", { n: reward }));
 });
 $("btn-win-levels").addEventListener("click", () => {
   void leaveWin("levels");
@@ -897,6 +964,8 @@ $("btn-lang-vi").addEventListener("click", () => changeLocale("vi"));
 
 setLocale(save.locale);
 setMuted(!save.sound);
+setReducedEffects(save.lowFx);
+track("fx_tier", { tier: fx().tier });
 void initAds();
 bindPressFeedback();
 refreshLocale();

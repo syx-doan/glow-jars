@@ -10,6 +10,9 @@ const fallback = (): SaveData => ({
   haptic: true,
   seenLessons: [],
   locale: "en",
+  lowFx: false,
+  coinAdDay: "",
+  coinAdCount: 0,
 });
 
 export function loadSave(): SaveData {
@@ -34,6 +37,10 @@ export function loadSave(): SaveData {
         ? parsed.seenLessons.filter((x): x is string => typeof x === "string")
         : [],
       locale: parsed.locale === "vi" ? "vi" : "en",
+      lowFx: parsed.lowFx === true,
+      coinAdDay: typeof parsed.coinAdDay === "string" ? parsed.coinAdDay : "",
+      coinAdCount:
+        typeof parsed.coinAdCount === "number" && parsed.coinAdCount >= 0 ? Math.floor(parsed.coinAdCount) : 0,
     };
   } catch {
     return fallback();
@@ -50,21 +57,9 @@ export function resetSave(): SaveData {
   return data;
 }
 
-export function starsFor(stats: {
-  undos: number;
-  hints: number;
-  extraJar: boolean;
-  moves: number;
-  extraMoves: number;
-  limit: number;
-}): number {
+/** Any paid rescue caps the result: hint or extra jar → 1 star, extra moves or >2 undos → 2 stars. */
+export function starsFor(stats: { undos: number; hints: number; extraJar: boolean; extraMoves: number }): number {
   if (stats.hints > 0 || stats.extraJar) return 1;
-  const over = stats.moves - (stats.limit + stats.extraMoves);
-  if (over <= 0 && stats.undos <= 2) return 3;
-  if (over <= 4) return 2;
-  return 1;
-}
-
-export function coinReward(stars: number, firstClear: boolean, comboMax: number): number {
-  return (firstClear ? 18 : 6) + stars * 4 + Math.min(20, comboMax * 6);
+  if (stats.extraMoves > 0 || stats.undos > 2) return 2;
+  return 3;
 }

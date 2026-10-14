@@ -35,8 +35,11 @@
               <rect x="52" y="28" width="56" height="8" rx="3" fill="#c9a056"/>
               <path d="M48 44c0-8 8-12 32-12s32 4 32 12v118c0 22-14 36-32 36s-32-14-32-36V44z" fill="url(#hero-glass)" stroke="#e4c27a" stroke-width="2.2"/>
               <circle cx="80" cy="154" r="16" fill="url(#hero-rose)"/>
+              <ellipse cx="71" cy="159" rx="2.8" ry="1.5" fill="#ff6996" opacity="0.45"/><ellipse cx="89" cy="159" rx="2.8" ry="1.5" fill="#ff6996" opacity="0.45"/><circle cx="75" cy="155" r="1.9" fill="#2a1636"/><circle cx="85" cy="155" r="1.9" fill="#2a1636"/><circle cx="74.4" cy="154.3" r="0.7" fill="#fff"/><circle cx="84.4" cy="154.3" r="0.7" fill="#fff"/><path d="M77.5 158.5q2.5 2.6 5 0" stroke="#2a1636" stroke-width="1.3" stroke-linecap="round"/><ellipse cx="74" cy="146" rx="5" ry="2.6" transform="rotate(-30 74 146)" fill="#fff" opacity="0.7"/>
               <circle cx="80" cy="116" r="16" fill="url(#hero-mint)"/>
+              <ellipse cx="71" cy="121" rx="2.8" ry="1.5" fill="#ff6996" opacity="0.45"/><ellipse cx="89" cy="121" rx="2.8" ry="1.5" fill="#ff6996" opacity="0.45"/><circle cx="75" cy="117" r="1.9" fill="#2a1636"/><circle cx="85" cy="117" r="1.9" fill="#2a1636"/><circle cx="74.4" cy="116.3" r="0.7" fill="#fff"/><circle cx="84.4" cy="116.3" r="0.7" fill="#fff"/><path d="M77.5 120.5q2.5 2.6 5 0" stroke="#2a1636" stroke-width="1.3" stroke-linecap="round"/><ellipse cx="74" cy="108" rx="5" ry="2.6" transform="rotate(-30 74 108)" fill="#fff" opacity="0.7"/>
               <circle cx="80" cy="78" r="16" fill="url(#hero-gold)"/>
+              <ellipse cx="71" cy="83" rx="2.8" ry="1.5" fill="#ff6996" opacity="0.45"/><ellipse cx="89" cy="83" rx="2.8" ry="1.5" fill="#ff6996" opacity="0.45"/><path d="M73 79.5q2.2 -3 4.4 0M82.6 79.5q2.2 -3 4.4 0" stroke="#2a1636" stroke-width="1.4" stroke-linecap="round"/><path d="M77 82h6a3 3 0 0 1 -6 0z" fill="#2a1636"/><ellipse cx="74" cy="70" rx="5" ry="2.6" transform="rotate(-30 74 70)" fill="#fff" opacity="0.7"/>
               <path d="M58 52c4-16 14-22 22-22" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
               <defs>
                 <linearGradient id="hero-lid" x1="58" y1="18" x2="102" y2="32">
@@ -105,6 +108,7 @@
         <div class="home-actions">
           <button class="primary home-play" id="btn-play" type="button">Continue</button>
           <button class="secondary" id="btn-levels" type="button" data-i18n="chooseLevels">Choose level</button>
+          <button class="reward-btn hidden" id="btn-free-coins" type="button">▶ Free coins</button>
         </div>
       </div>
 
@@ -132,11 +136,17 @@
         <canvas id="board"></canvas>
         <div class="hud" id="hud">
           <button class="tool" id="btn-undo" type="button" data-i18n-html="undo">
-            Undo <span id="undo-left">5</span>
+            Undo <span class="cost" id="cost-undo">5</span>
           </button>
-          <button class="tool" id="btn-hint" type="button" data-i18n="hint">Hint</button>
-          <button class="tool" id="btn-extra" type="button" data-i18n="extraJar">+ Jar</button>
-          <button class="tool" id="btn-moves" type="button" data-i18n="plusMoves">+5 moves</button>
+          <button class="tool" id="btn-hint" type="button" data-i18n-html="hint">
+            Hint <span class="cost" id="cost-hint"></span>
+          </button>
+          <button class="tool" id="btn-extra" type="button" data-i18n-html="extraJar">
+            + Jar <span class="cost" id="cost-jar"></span>
+          </button>
+          <button class="tool" id="btn-moves" type="button" data-i18n-html="plusMoves">
+            +5 moves <span class="cost" id="cost-moves"></span>
+          </button>
         </div>
         <div id="coach" class="coach hidden" aria-live="polite">
           <div class="coach-dim" id="coach-dim"></div>
@@ -168,6 +178,10 @@
           <label class="row-toggle">
             <span data-i18n="haptic">Haptics</span>
             <input id="toggle-haptic" type="checkbox" checked />
+          </label>
+          <label class="row-toggle">
+            <span data-i18n="lowFx">Reduce effects</span>
+            <input id="toggle-lowfx" type="checkbox" />
           </label>
           <div class="row-toggle lang-row">
             <span data-i18n="language">Language</span>

@@ -1,4 +1,23 @@
+import {
+  beamSprite,
+  freeSprite,
+  haloSprite,
+  heartSprite,
+  jarBackSprite,
+  jarFrontSprite,
+  jarPath,
+  lidSprite,
+  lighten,
+  MYSTERY_HEX,
+  orbSprite,
+  paintHighlight,
+  roundRect,
+  starSprite,
+  type Face,
+  type Sprite,
+} from "./art";
 import { iceHits, isFrozen, isMystery, isSealed, orbColor, topRun } from "./engine";
+import { fx, sampleFrame } from "./perf";
 import { PALETTE, type GameState, type Move } from "./types";
 
 type Rect = { i: number; x: number; y: number; w: number; h: number };
@@ -23,8 +42,22 @@ type Spark = {
   decay?: number;
   g?: number;
 };
+/** Rotating ✦ sparkle drawn from a sprite; `spin` offsets its twinkle phase. */
+type Twinkle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  decay: number;
+  size: number;
+  color: string;
+  g: number;
+  spin: number;
+};
 type Floater = { x: number; y: number; life: number; text: string; color: string; scale: number };
-type Lantern = { x: number; y: number; vy: number; life: number; color: string };
+type Heart = { x: number; y: number; vy: number; life: number; color: string; phase: number };
+type Beam = { x: number; y: number; w: number; h: number; life: number; color: string };
 type Ring = { x: number; y: number; r0: number; max: number; life: number; color: string; width: number };
 type Confetti = {
   x: number;
@@ -69,12 +102,17 @@ function easeOutCubic(t: number): number {
   return 1 - u * u * u;
 }
 
-function rgba(hex: string, a: number): string {
-  const n = parseInt(hex.slice(1, 7), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+/** Stable 0..1 noise per orb slot, so blinks are staggered but repeatable. */
+function slotNoise(i: number, n: number): number {
+  const v = Math.sin(i * 12.9898 + n * 78.233) * 43758.5453;
+  return v - Math.floor(v);
 }
 
 const AMBIENT = ["#7ee0c6", "#c77dff", "#ffd166", "#ff5d7a", "#4cc9f0"];
+const GLITTER = ["#ffffff", "#fff3c4", "#ffd166", "#c6f3ff", "#ffc6e0"];
+const RAINBOW = ["#ff6b9a", "#ffd166", "#7ee0c6", "#7ab8ff", "#c77dff"];
+/** Frame length the particle constants were tuned for. */
+const FRAME_MS = 1000 / 60;
 
 export class Board {
   private canvas: HTMLCanvasElement;
@@ -85,8 +123,12 @@ export class Board {
   private rects: Rect[] = [];
   private flies: Fly[] = [];
   private sparks: Spark[] = [];
+  private twinkles: Twinkle[] = [];
+  /** Idle sparkles around sealed jars; they don't keep the board at full frame rate. */
+  private glints: Twinkle[] = [];
   private floaters: Floater[] = [];
-  private lanterns: Lantern[] = [];
+  private hearts: Heart[] = [];
+  private beams: Beam[] = [];
   private shards: Shard[] = [];
   private rings: Ring[] = [];
   private confetti: Confetti[] = [];
@@ -99,6 +141,7 @@ export class Board {
   private crackFlash = 0;
   private shakeUntil = 0;
   private shakeJar = -1;
+  private nextGlint = 0;
   private raf = 0;
   private tap: ((index: number) => void) | null = null;
   private hidden = new Map<string, number>();
@@ -107,6 +150,14 @@ export class Board {
   private pourResolve: (() => void) | null = null;
   private pourAfter: GameState | null = null;
   private drag: Drag | null = null;
+  private dpr = 1;
+  private lastFrame = 0;
+  private lastDraw = 0;
+  private oddFrame = false;
+  /** Size-dependent art (orbs, jars, lids), rebuilt when layout or resolution changes. */
+  private sprites = new Map<string, Sprite>();
+  /** Fixed-size effect art (stars, hearts, beams), keyed by color. */
+  private fxSprites = new Map<string, Sprite>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -130,6 +181,7 @@ export class Board {
     this.canvas.removeEventListener("pointermove", this.onMove);
     this.canvas.removeEventListener("pointerup", this.onUp);
     this.canvas.removeEventListener("pointercancel", this.onCancel);
+    this.clearSprites();
   }
 
   onTap(cb: (index: number) => void): void {
@@ -192,48 +244,89 @@ export class Board {
     this.quakeUntil = now + dur;
   }
 
+  /** Scales a particle count to the device profile and the live-particle budget. */
+  private spawnCount(base: number, min = 4): number {
+    const live = this.sparks.length + this.confetti.length + this.twinkles.length + this.glints.length;
+    const room = fx().maxParticles - live;
+    return Math.max(0, Math.min(room, Math.max(min, Math.round(base * fx().particles))));
+  }
+
+  private addTwinkle(list: Twinkle[], t: Omit<Twinkle, "spin">): void {
+    list.push({ ...t, spin: Math.random() * Math.PI * 2 });
+  }
+
   /** Seal celebration; `power` grows with the combo (1..4). */
   burst(index: number, color: number, power = 1): void {
     const r = this.rects.find((x) => x.i === index);
     if (!r) return;
     const p = Math.max(1, Math.min(4, power));
     const hex = PALETTE[(orbColor(color) - 1) % PALETTE.length]!;
+    const pale = lighten(hex, 0.4);
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h * 0.42;
-    const count = Math.round(26 + p * 10);
-    for (let n = 0; n < count; n++) {
-      const a = (Math.PI * 2 * n) / count + Math.random() * 0.2;
-      const spd = (2 + Math.random() * 2.6) * (0.9 + p * 0.15);
+
+    const sparks = this.spawnCount(18 + p * 6, 8);
+    for (let n = 0; n < sparks; n++) {
+      const a = (Math.PI * 2 * n) / sparks + Math.random() * 0.2;
+      const spd = (2 + Math.random() * 2.4) * (0.9 + p * 0.15);
       this.sparks.push({
         x: cx,
         y: cy,
         vx: Math.cos(a) * spd,
         vy: Math.sin(a) * spd - 1,
         life: 1,
-        color: n % 5 === 0 ? "#fff6d8" : hex,
-        size: 1.6 + Math.random() * 2.4,
-        decay: 0.016 + Math.random() * 0.01,
+        color: n % 4 === 0 ? "#fff6d8" : n % 4 === 1 ? pale : hex,
+        size: 1.4 + Math.random() * 2,
+        decay: 0.017 + Math.random() * 0.01,
         g: 0.06,
       });
     }
+    const stars = this.spawnCount(8 + p * 3, 4);
+    for (let n = 0; n < stars; n++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = 1 + Math.random() * 2.6;
+      this.addTwinkle(this.twinkles, {
+        x: cx,
+        y: cy,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd - 1.2,
+        life: 1,
+        decay: 0.014 + Math.random() * 0.008,
+        size: 5 + Math.random() * 5 + p,
+        color: n % 3 === 0 ? "#ffffff" : n % 3 === 1 ? "#fff3c4" : pale,
+        g: 0.03,
+      });
+    }
+
     const now = performance.now();
     this.rings.push({ x: cx, y: cy, r0: r.w * 0.3, max: r.w * (1.1 + p * 0.3), life: 1, color: hex, width: 3 + p });
     if (p >= 2) {
       this.rings.push({ x: cx, y: cy, r0: r.w * 0.1, max: r.w * (1.6 + p * 0.4), life: 1.25, color: "#fff3c4", width: 2 });
     }
+    this.beams.push({ x: cx, y: r.y + r.h, w: r.w * 1.25, h: r.h * 2.1, life: 1, color: hex });
     this.jarFlash.set(index, { start: now, color: hex });
     this.lidDrop.set(index, now);
-    this.quake(2.5 + p * 1.5, 240 + p * 60);
-    this.lanterns.push({ x: cx, y: r.y, vy: -1.6, life: 1, color: hex });
+    this.quake((2.5 + p * 1.5) * fx().quake, 240 + p * 60);
+    const hearts = p >= 3 ? 2 : 1;
+    for (let n = 0; n < hearts; n++) {
+      this.hearts.push({
+        x: cx + (n ? 12 : -4),
+        y: r.y,
+        vy: -1.2 - Math.random() * 0.5,
+        life: 1,
+        color: lighten(hex, 0.15),
+        phase: Math.random() * 6,
+      });
+    }
   }
 
-  /** Confetti rain plus a few fireworks over the board. */
+  /** Confetti rain, glitter and a few fireworks over the board. */
   celebrate(): void {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     if (w < 8 || h < 8) return;
     const now = performance.now();
-    const count = Math.round(Math.min(220, 90 + w * 0.12));
+    const count = this.spawnCount(Math.min(170, 70 + w * 0.1), 16);
     for (let n = 0; n < count; n++) {
       this.confetti.push({
         x: Math.random() * w,
@@ -244,24 +337,40 @@ export class Board {
         vr: (Math.random() - 0.5) * 0.3,
         w: 6 + Math.random() * 5,
         h: 3 + Math.random() * 3,
-        color: PALETTE[n % 6]!,
+        color: PALETTE[n % PALETTE.length]!,
         life: 1,
       });
     }
-    for (let k = 0; k < 4; k++) {
-      this.fireworks.push({
-        at: now + k * 230,
-        x: w * (0.22 + ((k * 0.37) % 0.6)),
-        y: h * (0.2 + (k % 2) * 0.18),
-        color: PALETTE[(k * 3) % 6]!,
+    const glitter = this.spawnCount(30, 8);
+    for (let n = 0; n < glitter; n++) {
+      this.addTwinkle(this.twinkles, {
+        x: Math.random() * w,
+        y: -10 - Math.random() * h * 0.3,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: 1 + Math.random() * 1.4,
+        life: 1.4,
+        decay: 0.008 + Math.random() * 0.005,
+        size: 4 + Math.random() * 5,
+        color: GLITTER[n % GLITTER.length]!,
+        g: 0.01,
       });
     }
-    this.quake(5, 420);
+    const shows = fx().tier === "low" ? 2 : fx().tier === "mid" ? 4 : 5;
+    for (let k = 0; k < shows; k++) {
+      this.fireworks.push({
+        at: now + k * 230,
+        x: w * (0.18 + ((k * 0.37) % 0.64)),
+        y: h * (0.18 + (k % 2) * 0.18),
+        color: PALETTE[(k * 3) % PALETTE.length]!,
+      });
+    }
+    this.quake(5 * fx().quake, 420);
   }
 
   private explode(x: number, y: number, color: string): void {
-    for (let n = 0; n < 34; n++) {
-      const a = (Math.PI * 2 * n) / 34;
+    const count = this.spawnCount(28, 10);
+    for (let n = 0; n < count; n++) {
+      const a = (Math.PI * 2 * n) / count;
       const spd = 2.4 + Math.random() * 2.2;
       this.sparks.push({
         x,
@@ -275,12 +384,29 @@ export class Board {
         g: 0.05,
       });
     }
+    const stars = this.spawnCount(8, 3);
+    for (let n = 0; n < stars; n++) {
+      const a = (Math.PI * 2 * n) / stars + 0.3;
+      const spd = 1.2 + Math.random() * 1.6;
+      this.addTwinkle(this.twinkles, {
+        x,
+        y,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd,
+        life: 1,
+        decay: 0.012 + Math.random() * 0.006,
+        size: 6 + Math.random() * 4,
+        color: n % 2 ? "#ffffff" : lighten(color, 0.3),
+        g: 0.025,
+      });
+    }
     this.rings.push({ x, y, r0: 4, max: 70, life: 1, color, width: 3 });
   }
 
   private splash(x: number, y: number, hex: string, orb: number): void {
-    for (let n = 0; n < 9; n++) {
-      const a = -Math.PI / 2 + (n - 4) * 0.32;
+    const count = this.spawnCount(7, 3);
+    for (let n = 0; n < count; n++) {
+      const a = -Math.PI / 2 + (n - (count - 1) / 2) * 0.32;
       const spd = 1.4 + Math.random() * 1.6;
       this.sparks.push({
         x,
@@ -294,6 +420,19 @@ export class Board {
         g: 0.09,
       });
     }
+    if (this.spawnCount(1, 1) > 0) {
+      this.addTwinkle(this.twinkles, {
+        x: x + (Math.random() - 0.5) * orb,
+        y: y - orb,
+        vx: 0,
+        vy: -0.6,
+        life: 0.8,
+        decay: 0.03,
+        size: 5,
+        color: "#ffffff",
+        g: 0,
+      });
+    }
     this.rings.push({ x, y, r0: orb * 0.8, max: orb * 1.9, life: 0.7, color: hex, width: 2 });
   }
 
@@ -305,8 +444,9 @@ export class Board {
     const x = r.x + r.w / 2;
     const y = this.orbY(r, jar.length - 1, m.orb);
     this.crackFlash = performance.now() + 420;
-    for (let n = 0; n < 14; n++) {
-      const a = (Math.PI * 2 * n) / 14 + Math.random() * 0.3;
+    const count = Math.max(6, Math.round(14 * fx().particles));
+    for (let n = 0; n < count; n++) {
+      const a = (Math.PI * 2 * n) / count + Math.random() * 0.3;
       const spd = 1.8 + Math.random() * 2.4;
       this.shards.push({
         x,
@@ -386,9 +526,12 @@ export class Board {
     this.pourAfter = null;
     this.flies = [];
     this.sparks = [];
+    this.twinkles = [];
+    this.glints = [];
     this.shards = [];
     this.floaters = [];
-    this.lanterns = [];
+    this.hearts = [];
+    this.beams = [];
     this.rings = [];
     this.confetti = [];
     this.fireworks = [];
@@ -515,7 +658,7 @@ export class Board {
       if (r) {
         ctx.strokeStyle = "rgba(126,224,198,0.9)";
         ctx.lineWidth = 2.4;
-        round(ctx, r.x - 6, r.y - 8, r.w + 12, r.h + 14, 18);
+        roundRect(ctx, r.x - 6, r.y - 8, r.w + 12, r.h + 14, 18);
         ctx.stroke();
       }
     }
@@ -524,26 +667,92 @@ export class Board {
     ctx.save();
     ctx.globalAlpha = 0.92;
     for (let k = Math.min(run, 4) - 1; k >= 0; k--) {
-      this.drawOrb(drag.x, drag.y - orb * 1.4 - k * orb * 0.5, value, orb, true, now);
+      this.drawOrb(drag.x, drag.y - orb * 1.4 - k * orb * 0.5, value, orb, true, now, 1, "happy");
     }
     ctx.restore();
   }
 
   private loop(): void {
-    try {
-      this.draw(performance.now());
-    } catch {
-      /* one bad frame must not freeze the board */
+    const now = performance.now();
+    if (this.lastFrame && this.canvas.clientWidth >= 8) sampleFrame(now - this.lastFrame);
+    this.lastFrame = now;
+    this.oddFrame = !this.oddFrame;
+    // Weaker devices redraw idle boards (only slow ambient motion) at half rate.
+    if (!(this.oddFrame && fx().idleHalfRate && !this.animating(now))) {
+      try {
+        this.draw(now);
+      } catch {
+        /* one bad frame must not freeze the board */
+      }
     }
     this.raf = requestAnimationFrame(() => this.loop());
   }
 
+  private animating(now: number): boolean {
+    return (
+      this.flies.length > 0 ||
+      this.sparks.length > 0 ||
+      this.twinkles.length > 0 ||
+      this.rings.length > 0 ||
+      this.confetti.length > 0 ||
+      this.fireworks.length > 0 ||
+      this.hearts.length > 0 ||
+      this.beams.length > 0 ||
+      this.shards.length > 0 ||
+      this.floaters.length > 0 ||
+      this.jarFlash.size > 0 ||
+      this.lidDrop.size > 0 ||
+      this.drag !== null ||
+      now < this.quakeUntil ||
+      now < this.shakeUntil ||
+      now < this.crackFlash
+    );
+  }
+
+  /* ---------- sprite cache ---------- */
+
+  private clearSprites(): void {
+    for (const s of this.sprites.values()) freeSprite(s);
+    this.sprites.clear();
+  }
+
+  private sprite(key: string, make: () => Sprite): Sprite {
+    const hit = this.sprites.get(key);
+    if (hit) return hit;
+    if (this.sprites.size > 320) this.clearSprites();
+    const s = make();
+    this.sprites.set(key, s);
+    return s;
+  }
+
+  private fxSprite(key: string, make: () => Sprite): Sprite {
+    let s = this.fxSprites.get(key);
+    if (!s) {
+      s = make();
+      this.fxSprites.set(key, s);
+    }
+    return s;
+  }
+
+  private blit(s: Sprite, x: number, y: number): void {
+    this.ctx.drawImage(s.image, x - s.ox, y - s.oy, s.w, s.h);
+  }
+
+  /* ---------- frame ---------- */
+
   private draw(now: number): void {
     const { canvas, ctx } = this;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(fx().dprMax, window.devicePixelRatio || 1);
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     if (w < 8 || h < 8) return;
+    // Particle steps were tuned per 60fps frame; scale them by real elapsed time.
+    const k = this.lastDraw ? Math.min(3, Math.max(0.25, (now - this.lastDraw) / FRAME_MS)) : 1;
+    this.lastDraw = now;
+    if (dpr !== this.dpr) {
+      this.dpr = dpr;
+      this.clearSprites();
+    }
     const bw = Math.max(1, Math.floor(w * dpr));
     const bh = Math.max(1, Math.floor(h * dpr));
     if (canvas.width !== bw || canvas.height !== bh) {
@@ -555,16 +764,21 @@ export class Board {
     this.drawAmbient(w, h, now);
 
     if (!this.state) return;
+    const state = this.state;
     const m = this.metrics();
     this.rects = [];
 
+    let qx = 0;
+    let qy = 0;
     if (now < this.quakeUntil) {
-      const k = (this.quakeUntil - now) / this.quakeDur;
-      const p = this.quakePower * k * k;
-      ctx.translate(Math.sin(now / 15) * p, Math.cos(now / 21) * p * 0.7);
+      const q = (this.quakeUntil - now) / this.quakeDur;
+      const p = this.quakePower * q * q;
+      qx = Math.sin(now / 15) * p;
+      qy = Math.cos(now / 21) * p * 0.7;
+      ctx.translate(qx, qy);
     }
 
-    this.state.jars.forEach((jar, i) => {
+    state.jars.forEach((jar, i) => {
       const col = i % m.cols;
       const row = Math.floor(i / m.cols);
       let x = m.ox + col * (m.jarW + m.gapX);
@@ -576,7 +790,10 @@ export class Board {
       this.drawJar(jar, i, x, y, m.jarW, m.jarH, m.orb, now);
     });
 
+    this.spawnGlints(state, now);
+
     let flying = false;
+    const additive = fx().additive;
     for (const fly of this.flies) {
       const raw = (now - fly.start) / fly.dur;
       if (raw < 0) {
@@ -585,18 +802,18 @@ export class Board {
       }
       const t = Math.max(0, Math.min(1, raw));
       if (t < 1) flying = true;
-      const hex = isMystery(fly.color) ? "#d7d2c8" : PALETTE[(orbColor(fly.color) - 1) % PALETTE.length]!;
+      const hex = isMystery(fly.color) ? MYSTERY_HEX : PALETTE[(orbColor(fly.color) - 1) % PALETTE.length]!;
       if (t < 1) {
         ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        for (let k = 1; k <= 4; k++) {
-          const tt = t - k * 0.05;
+        if (additive) ctx.globalCompositeOperation = "lighter";
+        for (let n = 1; n <= 4; n++) {
+          const tt = t - n * 0.05;
           if (tt <= 0) break;
           const p = this.flyPos(fly, tt);
-          ctx.globalAlpha = 0.32 - k * 0.07;
+          ctx.globalAlpha = 0.32 - n * 0.07;
           ctx.fillStyle = hex;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, m.orb * (0.85 - k * 0.12), 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, m.orb * (0.85 - n * 0.12), 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.restore();
@@ -606,7 +823,7 @@ export class Board {
       }
       const p = this.flyPos(fly, t);
       const scale = 1 + Math.sin(t * Math.PI) * 0.12;
-      this.drawOrb(p.x, p.y, fly.color, m.orb * scale, true, now);
+      this.drawOrb(p.x, p.y, fly.color, m.orb, true, now, scale, isMystery(fly.color) ? "sleep" : "happy");
     }
     if (this.flies.length && !flying) this.finishPour(this.pourGen);
 
@@ -620,86 +837,185 @@ export class Board {
     }
 
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
+    if (additive) ctx.globalCompositeOperation = "lighter";
+    this.drawBeams(k);
+    this.drawRings(k);
+    this.drawSparks(k, now);
+    this.drawTwinkles(this.twinkles, k, now);
+    this.drawTwinkles(this.glints, k, now);
+    ctx.restore();
+
+    this.drawConfetti(k, now, h, dpr, qx, qy);
+    this.drawHearts(k, now);
+    this.drawShards(k);
+    this.drawFloaters(k, m.orb);
+  }
+
+  /* ---------- effects ---------- */
+
+  /** Lazy sparkles drifting up out of sealed jars while the board is idle. */
+  private spawnGlints(state: GameState, now: number): void {
+    if (fx().tier === "low" || now < this.nextGlint) return;
+    this.nextGlint = now + (fx().tier === "high" ? 260 : 520);
+    const sealed = this.rects.filter((r) => isSealed(state.jars[r.i]!, state.cap));
+    if (!sealed.length || this.spawnCount(1, 1) <= 0) return;
+    const r = sealed[Math.floor(Math.random() * sealed.length)]!;
+    const top = state.jars[r.i]![state.jars[r.i]!.length - 1]!;
+    const hex = PALETTE[(orbColor(top) - 1) % PALETTE.length]!;
+    this.addTwinkle(this.glints, {
+      x: r.x + r.w * (0.15 + Math.random() * 0.7),
+      y: r.y + 14 + Math.random() * (r.h - 24),
+      vx: 0,
+      vy: -0.25 - Math.random() * 0.2,
+      life: 1,
+      decay: 0.016 + Math.random() * 0.01,
+      size: 3 + Math.random() * 3,
+      color: Math.random() < 0.5 ? "#ffffff" : lighten(hex, 0.45),
+      g: 0,
+    });
+  }
+
+  private drawBeams(k: number): void {
+    const ctx = this.ctx;
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i]!;
+      b.life -= 0.022 * k;
+      if (b.life <= 0) {
+        this.beams.splice(i, 1);
+        continue;
+      }
+      const s = this.fxSprite(`beam|${b.color}`, () => beamSprite(b.color));
+      const grow = easeOutCubic(1 - b.life);
+      const bw = b.w * (0.7 + 0.3 * grow);
+      const bh = b.h * (0.55 + 0.45 * grow);
+      ctx.globalAlpha = b.life * b.life * 0.8;
+      ctx.drawImage(s.image, b.x - bw / 2, b.y - bh, bw, bh);
+    }
+  }
+
+  private drawRings(k: number): void {
+    const ctx = this.ctx;
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const g = this.rings[i]!;
-      g.life -= 0.035;
+      g.life -= 0.035 * k;
       const life = Math.min(1, g.life);
       if (life <= 0) {
         this.rings.splice(i, 1);
         continue;
       }
       const r = lerp(g.r0, g.max, easeOutCubic(1 - life));
-      ctx.globalAlpha = life * 0.85;
+      ctx.globalAlpha = life * 0.7;
       ctx.strokeStyle = g.color;
       ctx.lineWidth = Math.max(0.5, g.width * life);
       ctx.beginPath();
       ctx.arc(g.x, g.y, r, 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  private drawSparks(k: number, now: number): void {
+    const ctx = this.ctx;
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const s = this.sparks[i]!;
-      s.x += s.vx;
-      s.y += s.vy;
-      s.vx *= 0.985;
-      s.vy += s.g ?? 0.04;
-      s.life -= s.decay ?? 0.02;
+      s.x += s.vx * k;
+      s.y += s.vy * k;
+      s.vx *= Math.pow(0.985, k);
+      s.vy += (s.g ?? 0.04) * k;
+      s.life -= (s.decay ?? 0.02) * k;
       if (s.life <= 0) {
         this.sparks.splice(i, 1);
         continue;
       }
       const size = s.size ?? 2.2;
+      const flick = 0.7 + 0.3 * Math.sin(now / 45 + i);
       ctx.fillStyle = s.color;
-      ctx.globalAlpha = s.life * 0.28;
+      ctx.globalAlpha = s.life * 0.22 * flick;
       ctx.beginPath();
       ctx.arc(s.x, s.y, size * 2.6, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = s.life;
+      ctx.globalAlpha = Math.min(1, s.life) * flick;
       ctx.beginPath();
       ctx.arc(s.x, s.y, size, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
+  }
 
+  private drawTwinkles(list: Twinkle[], k: number, now: number): void {
+    const ctx = this.ctx;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const t = list[i]!;
+      t.x += t.vx * k;
+      t.y += t.vy * k;
+      t.vx *= Math.pow(0.97, k);
+      t.vy += t.g * k;
+      t.life -= t.decay * k;
+      if (t.life <= 0) {
+        list.splice(i, 1);
+        continue;
+      }
+      const s = this.fxSprite(`star|${t.color}`, () => starSprite(t.color));
+      const pulse = 0.6 + 0.4 * Math.sin(t.spin + now / 70);
+      const d = t.size * 2 * pulse * Math.min(1, t.life * 2);
+      if (d < 0.5) continue;
+      ctx.globalAlpha = Math.min(1, t.life * 1.4);
+      ctx.drawImage(s.image, t.x - d / 2, t.y - d / 2, d, d);
+    }
+  }
+
+  private drawConfetti(k: number, now: number, h: number, dpr: number, qx: number, qy: number): void {
+    if (!this.confetti.length) return;
+    const ctx = this.ctx;
     for (let i = this.confetti.length - 1; i >= 0; i--) {
       const c = this.confetti[i]!;
-      c.x += c.vx + Math.sin(now / 260 + c.rot) * 0.7;
-      c.y += c.vy;
-      c.rot += c.vr;
-      if (c.y > h * 0.6) c.life -= 0.02;
+      c.x += (c.vx + Math.sin(now / 260 + c.rot) * 0.7) * k;
+      c.y += c.vy * k;
+      c.rot += c.vr * k;
+      if (c.y > h * 0.6) c.life -= 0.02 * k;
       if (c.life <= 0 || c.y > h + 20) {
         this.confetti.splice(i, 1);
         continue;
       }
-      ctx.save();
-      ctx.translate(c.x, c.y);
-      ctx.rotate(c.rot);
-      ctx.scale(1, Math.cos(now / 140 + c.rot * 3));
+      // Direct matrix instead of save/translate/rotate/scale/restore per piece.
+      const cos = Math.cos(c.rot);
+      const sin = Math.sin(c.rot);
+      const flip = Math.cos(now / 140 + c.rot * 3);
+      ctx.setTransform(cos * dpr, sin * dpr, -sin * flip * dpr, cos * flip * dpr, (c.x + qx) * dpr, (c.y + qy) * dpr);
       ctx.globalAlpha = c.life;
       ctx.fillStyle = c.color;
       ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
-      ctx.restore();
     }
+    ctx.globalAlpha = 1;
+    ctx.setTransform(dpr, 0, 0, dpr, qx * dpr, qy * dpr);
+  }
 
-    for (let i = this.lanterns.length - 1; i >= 0; i--) {
-      const L = this.lanterns[i]!;
-      L.y += L.vy;
-      L.life -= 0.012;
-      ctx.globalAlpha = Math.max(0, L.life);
-      ctx.fillStyle = L.color;
-      round(ctx, L.x - 7, L.y - 10, 14, 18, 4);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      if (L.life <= 0) this.lanterns.splice(i, 1);
+  private drawHearts(k: number, now: number): void {
+    const ctx = this.ctx;
+    for (let i = this.hearts.length - 1; i >= 0; i--) {
+      const L = this.hearts[i]!;
+      L.y += L.vy * k;
+      L.life -= 0.011 * k;
+      if (L.life <= 0) {
+        this.hearts.splice(i, 1);
+        continue;
+      }
+      const s = this.fxSprite(`heart|${L.color}`, () => heartSprite(L.color));
+      const grow = Math.min(1, (1 - L.life) * 6);
+      const d = 22 * (0.5 + 0.5 * grow);
+      ctx.globalAlpha = Math.min(1, L.life * 1.5);
+      ctx.drawImage(s.image, L.x + Math.sin(now / 260 + L.phase) * 6 - d / 2, L.y - d / 2, d, d);
     }
+    ctx.globalAlpha = 1;
+  }
 
+  private drawShards(k: number): void {
+    const ctx = this.ctx;
     for (let i = this.shards.length - 1; i >= 0; i--) {
       const s = this.shards[i]!;
-      s.x += s.vx;
-      s.y += s.vy;
-      s.vy += 0.08;
-      s.rot += s.vr;
-      s.life -= 0.022;
+      s.x += s.vx * k;
+      s.y += s.vy * k;
+      s.vy += 0.08 * k;
+      s.rot += s.vr * k;
+      s.life -= 0.022 * k;
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(s.rot);
@@ -717,29 +1033,49 @@ export class Board {
       ctx.restore();
       if (s.life <= 0) this.shards.splice(i, 1);
     }
+  }
 
-    const base = Math.max(16, m.orb * 0.62);
-    ctx.textAlign = "center";
-    ctx.lineJoin = "round";
+  /** Bouncy candy-gradient labels; big combos get a rainbow fill. */
+  private drawFloaters(k: number, orb: number): void {
+    const ctx = this.ctx;
+    const base = Math.max(16, orb * 0.62);
     for (let i = this.floaters.length - 1; i >= 0; i--) {
       const f = this.floaters[i]!;
-      f.y -= 0.7;
-      f.life -= 0.016;
+      f.y -= 0.7 * k;
+      f.life -= 0.016 * k;
       if (f.life <= 0) {
         this.floaters.splice(i, 1);
         continue;
       }
       const pop = f.life > 0.86 ? 1 + ((f.life - 0.86) / 0.14) * 0.7 : 1;
+      const size = Math.round(base * f.scale * pop);
       ctx.save();
-      ctx.font = `800 ${Math.round(base * f.scale * pop)}px Trebuchet MS, sans-serif`;
+      ctx.translate(f.x, f.y);
+      ctx.rotate(Math.sin((1 - f.life) * 14) * 0.05 * f.scale);
+      ctx.font = `900 ${size}px "Trebuchet MS", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.lineJoin = "round";
       ctx.globalAlpha = Math.min(1, f.life * 1.6);
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = "rgba(14, 8, 28, 0.75)";
-      ctx.strokeText(f.text, f.x, f.y);
-      ctx.shadowColor = f.color;
-      ctx.shadowBlur = 14;
-      ctx.fillStyle = f.color;
-      ctx.fillText(f.text, f.x, f.y);
+      ctx.lineWidth = Math.max(3, size * 0.24);
+      ctx.strokeStyle = "rgba(34,14,52,0.9)";
+      ctx.strokeText(f.text, 0, 0);
+      let fill: CanvasGradient;
+      if (f.scale >= 1.3) {
+        const tw = ctx.measureText(f.text).width;
+        fill = ctx.createLinearGradient(-tw / 2, 0, tw / 2, 0);
+        RAINBOW.forEach((c, n) => fill.addColorStop(n / (RAINBOW.length - 1), c));
+      } else {
+        fill = ctx.createLinearGradient(0, -size * 0.85, 0, size * 0.1);
+        fill.addColorStop(0, "#ffffff");
+        fill.addColorStop(0.5, lighten(f.color, 0.35));
+        fill.addColorStop(1, f.color);
+      }
+      if (fx().shadows) {
+        ctx.shadowColor = f.color;
+        ctx.shadowBlur = 12;
+      }
+      ctx.fillStyle = fill;
+      ctx.fillText(f.text, 0, 0);
       ctx.restore();
     }
   }
@@ -754,22 +1090,23 @@ export class Board {
   private drawAmbient(w: number, h: number, now: number): void {
     if (w < 8 || h < 8) return;
     const ctx = this.ctx;
-    for (let i = 0; i < 18; i++) {
+    const motes = fx().ambient;
+    for (let i = 0; i < motes + 2; i++) {
       const x = ((i * 89 + now / 80) % (w + 40)) - 20;
       const y = (i * 47) % h;
-      ctx.fillStyle = `rgba(255,255,255,${0.1 + (i % 3) * 0.06})`;
+      ctx.fillStyle = `rgba(255,255,255,${0.08 + (i % 3) * 0.04})`;
       ctx.beginPath();
       ctx.arc(x, y, i % 2 ? 1.2 : 1.8, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 16; i++) {
+    if (fx().additive) ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < motes; i++) {
       const speed = 42 + (i % 5) * 16;
       const x = ((i * 97.3) % w) + Math.sin(now / 2400 + i * 1.7) * 22;
       const y = h + 20 - ((now / speed + i * 83) % (h + 40));
       const r = 1.4 + (i % 4) * 0.9;
-      const a = 0.22 + (i % 3) * 0.1;
+      const a = 0.16 + (i % 3) * 0.07;
       ctx.fillStyle = AMBIENT[i % AMBIENT.length]!;
       ctx.globalAlpha = a * 0.3;
       ctx.beginPath();
@@ -782,6 +1119,8 @@ export class Board {
     }
     ctx.restore();
   }
+
+  /* ---------- jars & orbs ---------- */
 
   private drawJar(
     jar: number[],
@@ -796,107 +1135,67 @@ export class Board {
     const ctx = this.ctx;
     const cap = this.state!.cap;
     const selected = this.selected === index;
-    const hinted =
-      this.hint && (this.hint.from === index || this.hint.to === index);
+    const hinted = this.hint && (this.hint.from === index || this.hint.to === index);
     const sealed = isSealed(jar, cap);
+    const topValue = jar[jar.length - 1];
+    const tint = sealed && topValue !== undefined ? PALETTE[(orbColor(topValue) - 1) % PALETTE.length]! : null;
+    const dpr = this.dpr;
+    const size = `${Math.round(w * 2)}x${Math.round(h * 2)}`;
 
     ctx.save();
     if (selected) ctx.translate(0, -(6 + Math.sin(now / 180) * 1.5));
 
-    if (hinted) {
-      ctx.strokeStyle = "rgba(228,194,122,0.85)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 4]);
-      round(ctx, x - 6, y - 8, w + 12, h + 14, 18);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    const topValue = jar[jar.length - 1];
-    const tint =
-      sealed && topValue !== undefined
-        ? PALETTE[(orbColor(topValue) - 1) % PALETTE.length]!
-        : null;
-
-    const floor = ctx.createRadialGradient(x + w / 2, y + h, 1, x + w / 2, y + h, w * 0.85);
-    floor.addColorStop(0, tint ? rgba(tint, 0.5) : selected ? "rgba(228,194,122,0.45)" : "rgba(180,160,255,0.28)");
-    floor.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = floor;
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h, w * 0.85, w * 0.26, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    const glass = ctx.createLinearGradient(x, 0, x + w, 0);
-    glass.addColorStop(0, "rgba(255,255,255,0.2)");
-    glass.addColorStop(0.24, "rgba(255,255,255,0.07)");
-    glass.addColorStop(0.7, "rgba(255,255,255,0.06)");
-    glass.addColorStop(1, "rgba(255,255,255,0.16)");
-    ctx.save();
-    if (tint) {
-      ctx.shadowColor = tint;
-      ctx.shadowBlur = 14 + Math.sin(now / 320 + index) * 5;
-    } else if (selected) {
-      ctx.shadowColor = "#e4c27a";
-      ctx.shadowBlur = 16;
-    }
-    ctx.fillStyle = glass;
-    ctx.strokeStyle = selected
-      ? "rgba(255,214,130,0.95)"
-      : tint
-        ? rgba(tint, 0.85)
-        : "rgba(225,218,255,0.55)";
-    ctx.lineWidth = selected ? 2.4 : tint ? 2 : 1.4;
-    round(ctx, x, y + 10, w, h - 10, 16);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-    if (tint) {
-      ctx.fillStyle = rgba(tint, 0.14);
-      round(ctx, x, y + 10, w, h - 10, 16);
-      ctx.fill();
-    }
-
+    let flashA = 0;
     const flash = this.jarFlash.get(index);
     if (flash) {
-      const a = 1 - (now - flash.start) / 650;
-      if (a <= 0) this.jarFlash.delete(index);
-      else {
-        ctx.save();
-        ctx.shadowColor = flash.color;
-        ctx.shadowBlur = 34 * a;
-        ctx.fillStyle = `rgba(255,255,255,${0.32 * a})`;
-        ctx.strokeStyle = rgba(flash.color, a);
-        ctx.lineWidth = 3;
-        round(ctx, x - 2, y + 8, w + 4, h - 6, 18);
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
+      flashA = 1 - (now - flash.start) / 700;
+      if (flashA <= 0) {
+        this.jarFlash.delete(index);
+        flashA = 0;
       }
     }
 
-    ctx.strokeStyle = "rgba(255,255,255,0.26)";
-    ctx.lineWidth = Math.max(2, w * 0.06);
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.2, y + 28);
-    ctx.lineTo(x + w * 0.2, y + h - 20);
-    ctx.stroke();
-    ctx.lineCap = "butt";
+    if (tint || selected) {
+      const color = selected ? "#ffd27a" : tint!;
+      const halo = this.sprite(`halo|${size}|${color}`, () => haloSprite(w, h, color, dpr));
+      const pulse = selected ? 0.85 : 0.5 + Math.sin(now / 420 + index) * 0.2;
+      ctx.globalAlpha = Math.min(1, pulse + flashA * 0.6);
+      this.blit(halo, x, y);
+      ctx.globalAlpha = 1;
+    }
 
-    ctx.beginPath();
-    ctx.moveTo(x + 8, y + 18);
-    ctx.lineTo(x + w - 8, y + 18);
-    ctx.strokeStyle = "rgba(255,255,255,0.22)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
+    const look = `${size}|${tint ?? ""}|${+selected}`;
+    this.blit(this.sprite(`jb|${look}`, () => jarBackSprite(w, h, tint, selected, dpr)), x, y);
 
-    ctx.fillStyle = "rgba(255,255,255,0.14)";
-    round(ctx, x + w * 0.18, y, w * 0.64, 16, 6);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.42)";
-    ctx.stroke();
+    const run = jar.length - topRun(jar, false);
+    for (let n = 0; n < jar.length; n++) {
+      if (this.hidden.has(`${index}:${n}`)) continue;
+      const value = jar[n]!;
+      const glow = selected && n >= run;
+      let face: Face = "open";
+      if (isFrozen(value)) face = "cold";
+      else if (isMystery(value)) face = "sleep";
+      else if (sealed || glow) face = "happy";
+      else if (this.blinking(now, index, n)) face = "blink";
+      this.drawOrb(x + w / 2, this.orbY({ i: index, x, y, w, h }, n, orb), value, orb, glow, now, 1, face);
+    }
 
-    if (sealed) {
+    this.blit(this.sprite(`jf|${look}`, () => jarFrontSprite(w, h, tint, selected, dpr)), x, y);
+
+    if (tint) {
+      if (flashA > 0) {
+        jarPath(ctx, x, y, w, h);
+        ctx.fillStyle = `rgba(255,255,255,${0.3 * flashA})`;
+        ctx.fill();
+      }
+      let sweep = -1;
+      if (flash && flashA > 0) sweep = (now - flash.start) / 600;
+      else if (fx().tier !== "low") {
+        const t = ((now + index * 830) % 3600) / 3600;
+        if (t < 0.17) sweep = t / 0.17;
+      }
+      if (sweep >= 0 && sweep <= 1) this.drawGlint(x, y, w, h, sweep);
+
       const dropAt = this.lidDrop.get(index);
       let off = 0;
       if (dropAt !== undefined) {
@@ -904,27 +1203,40 @@ export class Board {
         if (t >= 1) this.lidDrop.delete(index);
         else off = -30 * (1 - t) * (1 - t) * Math.abs(Math.cos(t * Math.PI * 2));
       }
-      const lid = ctx.createLinearGradient(0, y - 2 + off, 0, y + 10 + off);
-      lid.addColorStop(0, "#fff1b8");
-      lid.addColorStop(1, "#d9a84a");
-      ctx.save();
-      ctx.shadowColor = "#ffd166";
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = lid;
-      round(ctx, x + w * 0.12, y - 2 + off, w * 0.76, 12, 4);
-      ctx.fill();
-      ctx.restore();
+      this.blit(this.sprite(`lid|${Math.round(w * 2)}|${tint}`, () => lidSprite(w, tint, dpr)), x, y + off);
     }
 
-    for (let n = 0; n < jar.length; n++) {
-      if (this.hidden.has(`${index}:${n}`)) continue;
-      const value = jar[n]!;
-      const ox = x + w / 2;
-      const oy = this.orbY({ i: index, x, y, w, h }, n, orb);
-      const run = n >= jar.length - topRun(jar, false);
-      this.drawOrb(ox, oy, value, orb, selected && run, now);
+    if (hinted) {
+      ctx.strokeStyle = "rgba(228,194,122,0.85)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      roundRect(ctx, x - 6, y - 8, w + 12, h + 14, 18);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
+    ctx.restore();
+  }
 
+  /** Each orb blinks for ~140ms every 4–7s, staggered by slot. */
+  private blinking(now: number, jar: number, slot: number): boolean {
+    const n = slotNoise(jar, slot);
+    const period = 4200 + n * 2600;
+    return (now + n * 9000) % period < 140;
+  }
+
+  /** Diagonal shine sweeping across the glass; `p` runs 0..1. */
+  private drawGlint(x: number, y: number, w: number, h: number, p: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    jarPath(ctx, x, y, w, h);
+    ctx.clip();
+    const bx = x - w * 0.5 + p * w * 2;
+    const g = ctx.createLinearGradient(bx - w * 0.3, y + h * 0.2, bx + w * 0.3, y);
+    g.addColorStop(0, "rgba(255,255,255,0)");
+    g.addColorStop(0.5, "rgba(255,255,255,0.42)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
     ctx.restore();
   }
 
@@ -935,48 +1247,22 @@ export class Board {
     r: number,
     glow = false,
     now = 0,
+    scale = 1,
+    face: Face = "happy",
   ): void {
     const radius = Math.max(4, r);
-    const ctx = this.ctx;
     const mystery = isMystery(value);
     const frozen = isFrozen(value);
-    const hex = mystery ? "#d7d2c8" : PALETTE[(orbColor(value) - 1) % PALETTE.length]!;
-    const coreR = Math.max(3, frozen ? radius * 0.78 : radius);
-
-    ctx.save();
-    ctx.shadowColor = frozen ? "#8fdfff" : hex;
-    ctx.shadowBlur = glow ? 26 : frozen ? 18 : 16;
-    const g = ctx.createRadialGradient(
-      x - coreR * 0.25,
-      y - coreR * 0.3,
-      Math.max(0.2, coreR * 0.1),
-      x,
-      y,
-      coreR,
-    );
-    g.addColorStop(0, mystery ? "#fff" : "#fff6");
-    g.addColorStop(0.35, hex);
-    g.addColorStop(1, shade(hex, mystery ? -10 : -26));
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, coreR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    if (mystery && !frozen) {
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(x, y, radius * 0.42, 0.2, 2.2);
-      ctx.stroke();
-    }
-
-    if (frozen) this.drawIceShell(x, y, radius, iceHits(value), now);
-
-    ctx.fillStyle = "rgba(255,255,255,0.68)";
-    ctx.beginPath();
-    ctx.ellipse(x - radius * 0.28, y - radius * 0.34, Math.max(0.5, radius * 0.22), Math.max(0.5, radius * 0.12), -0.5, 0, Math.PI * 2);
-    ctx.fill();
+    const hex = mystery ? MYSTERY_HEX : PALETTE[(orbColor(value) - 1) % PALETTE.length]!;
+    // Faces are unreadable on tiny orbs.
+    const shown: Face | null = radius >= 8 ? face : null;
+    const key = `o|${hex}|${+mystery}${+frozen}${+glow}|${shown ?? "-"}|${Math.round(radius * 4)}`;
+    const sprite = this.sprite(key, () => orbSprite(hex, radius, { mystery, frozen, glow, face: shown }, this.dpr));
+    this.ctx.drawImage(sprite.image, x - sprite.ox * scale, y - sprite.oy * scale, sprite.w * scale, sprite.h * scale);
+    if (!frozen) return;
+    // The ice shell animates (cracks, flash), so it stays live; frozen orbs are few.
+    this.drawIceShell(x, y, radius * scale, iceHits(value), now);
+    paintHighlight(this.ctx, x, y, radius * scale);
   }
 
   private drawIceShell(x: number, y: number, r: number, hits: number, now: number): void {
@@ -1065,34 +1351,4 @@ export class Board {
 
     ctx.restore();
   }
-}
-
-function round(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): void {
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 1 || h <= 1) {
-    ctx.beginPath();
-    return;
-  }
-  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
-}
-
-function shade(hex: string, amt: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.max(0, Math.min(255, (n >> 16) + amt));
-  const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amt));
-  const b = Math.max(0, Math.min(255, (n & 255) + amt));
-  return `rgb(${r},${g},${b})`;
 }
