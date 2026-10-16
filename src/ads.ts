@@ -38,12 +38,16 @@ const FLAGS = {
   interstitial_enabled: true,
   rewarded_enabled: true,
   double_coins_enabled: true,
+  coin_ad_enabled: true,
 };
 const NUMBERS = {
   interstitial_every: 4,
   interstitial_min_seconds: 90,
   interstitial_start_level: 5,
   banner_start_level: 4,
+  win_ad_multiplier: 3,
+  coin_ad_reward: 30,
+  coin_ad_daily: 5,
 };
 type Flag = keyof typeof FLAGS;
 type Num = keyof typeof NUMBERS;
@@ -382,6 +386,20 @@ export async function maybeInterstitial(level: number): Promise<boolean> {
 
 export function doubleCoinsEnabled(): boolean {
   return allowed("rewarded") && flags.double_coins_enabled;
+}
+
+/** Total payout multiplier for the win-screen ad (base reward included). */
+export function winAdMultiplier(): number {
+  return Math.max(2, Math.round(numbers.win_ad_multiplier));
+}
+
+/** Free-coin ad on the home screen. Off when rewarded ads are off, since rewards would then be free. */
+export function coinAdConfig(): { enabled: boolean; reward: number; daily: number } {
+  return {
+    enabled: allowed("rewarded") && flags.coin_ad_enabled,
+    reward: Math.max(1, Math.round(numbers.coin_ad_reward)),
+    daily: Math.round(numbers.coin_ad_daily),
+  };
 }
 
 /** When rewarded ads are switched off remotely, the reward is granted without an ad. */

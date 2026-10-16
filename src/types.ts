@@ -52,6 +52,11 @@ export type SaveData = {
   haptic: boolean;
   seenLessons: string[];
   locale: "en" | "vi";
+  /** Force the lightest effects profile (also eases glare). */
+  lowFx: boolean;
+  /** Day key (YYYY-MM-DD) and count of free-coin ads watched that day. */
+  coinAdDay: string;
+  coinAdCount: number;
 };
 
 export type PlayStats = {
