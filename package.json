@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
     "android:sync": "npm run build && npx cap sync android",
-    "android:run": "npm run android:sync && npx cap run android"
+    "android:run": "npm run android:sync && npx cap run android",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:open": "cap open ios"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
@@ -21,6 +23,8 @@
     "@capacitor/android": "^6.2.2",
     "@capacitor/cli": "^6.2.2",
     "@capacitor/core": "^6.2.2",
+    "@capacitor/haptics": "^6.0.3",
+    "@capacitor/ios": "^6.2.2",
     "firebase": "^11.10.0"
   }
 }

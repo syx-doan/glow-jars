@@ -17,6 +17,7 @@ const en: Dict = {
   resetConfirm: "Erase all levels and coins?",
   guideReset: "Ready — open level 1",
   fineprint: "Glow Jars is free with ads. Watch an optional ad for hints, jars, moves or bonus coins.",
+  "fineprint.adFree": "Glow Jars is free to play.",
   privacyOptions: "Privacy & ad choices",
   eyebrow: "Night of glowing jars",
   tagline: "Sort orbs · crack ice · reveal gems",
@@ -41,6 +42,7 @@ const en: Dict = {
   extraJar: "+ Jar",
   plusMoves: "+5 moves",
   outOfMoves: "Out of moves — tap +5 moves (ads or 50 coins)",
+  "outOfMoves.adFree": "Out of moves. Tap +5 moves to keep going.",
   plusMovesToast: "+5 moves",
   coachTitle: "Guide",
   coachBody: "Tap the top orb to pick it up.",
@@ -78,6 +80,7 @@ const en: Dict = {
   omTitle: "Keep going?",
   omBody: "Get 5 more moves and finish this level.",
   omAd: "▶ Watch ad: +5 moves",
+  "omAd.adFree": "+5 moves",
   omCoins: "{n} coins: +5 moves",
   omRetry: "Restart",
   omClose: "Not now",
@@ -115,12 +118,14 @@ const en: Dict = {
   "tut.seal.body": "A jar with 4 matching orbs seals — no more pouring out. Seal streaks for combos.",
   "tut.moves.title": "Moves",
   "tut.moves.body": "Each pour costs 1 move. Out of moves? Tap +5 moves (ads or coins).",
+  "tut.moves.body.adFree": "Each pour costs 1 move. Out of moves? Tap +5 moves.",
   "tut.buffer.title": "Buffer jar",
   "tut.buffer.body": "Empty jars hold orbs when stuck. Don’t mix colors — leave room for later moves.",
   "tut.undo.title": "Undo",
   "tut.undo.body": "5 free undos per level. After that it costs 15 coins.",
   "tut.tools.title": "Rescue tools",
   "tut.tools.body": "Hint, extra empty jar, or +5 moves. Coins or watch an ad.",
+  "tut.tools.body.adFree": "Get a hint, add an empty jar, or get 5 more moves. Use coins when you have enough.",
   "tut.mystery.title": "Hidden gems",
   "tut.mystery.top": "Faded white orbs hide color. Tap each one to reveal — no batch pour.",
   "tut.mystery.buried": "White orbs sit inside the jar. Pour the top off, then tap each to reveal.",
@@ -160,6 +165,7 @@ const vi: Dict = {
   resetConfirm: "Xóa hết màn và xu?",
   guideReset: "Đã bật lại — vào màn 1",
   fineprint: "Glow Jars miễn phí và có quảng cáo. Có thể tự chọn xem ads để nhận gợi ý, lọ, nước đi hoặc thêm xu.",
+  "fineprint.adFree": "Glow Jars miễn phí.",
   privacyOptions: "Quyền riêng tư & quảng cáo",
   eyebrow: "Đêm hội lọ sáng",
   tagline: "Sắp bóng · nứt băng · mở ngọc ẩn",
@@ -184,6 +190,7 @@ const vi: Dict = {
   extraJar: "+ Lọ",
   plusMoves: "+5 nước đi",
   outOfMoves: "Hết nước đi — bấm +5 nước đi (ads hoặc 50 xu)",
+  "outOfMoves.adFree": "Hết nước đi. Bấm +5 nước đi để chơi tiếp.",
   plusMovesToast: "+5 nước đi",
   coachTitle: "Hướng dẫn",
   coachBody: "Chạm vào bóng trên cùng để cầm.",
@@ -221,6 +228,7 @@ const vi: Dict = {
   omTitle: "Chơi tiếp chứ?",
   omBody: "Thêm 5 nước đi để hoàn thành màn này.",
   omAd: "▶ Xem ads: +5 nước đi",
+  "omAd.adFree": "+5 nước đi",
   omCoins: "{n} xu: +5 nước đi",
   omRetry: "Chơi lại",
   omClose: "Để sau",
@@ -257,12 +265,14 @@ const vi: Dict = {
   "tut.seal.body": "Lọ đủ 4 bóng cùng màu sẽ khóa — không đổ ra nữa. Khóa liên tiếp để combo.",
   "tut.moves.title": "Nước đi",
   "tut.moves.body": "Mỗi lần đổ tốn 1 nước đi. Hết lượt thì bấm +5 nước đi (ads hoặc xu).",
+  "tut.moves.body.adFree": "Mỗi lần đổ tốn 1 nước đi. Hết lượt thì bấm +5 nước đi.",
   "tut.buffer.title": "Lọ đệm",
   "tut.buffer.body": "Lọ trống để đặt bóng tạm khi kẹt. Đừng nhồi lẫn màu — để chỗ cho nước đi sau.",
   "tut.undo.title": "Hoàn tác",
   "tut.undo.body": "5 lần hoàn tác miễn phí mỗi màn. Hết lượt thì tốn 15 xu.",
   "tut.tools.title": "Cứu màn",
   "tut.tools.body": "Gợi ý, thêm lọ trống, hoặc +5 nước đi. Xu hoặc xem ads.",
+  "tut.tools.body.adFree": "Nhận gợi ý, thêm lọ trống hoặc thêm 5 nước đi. Dùng xu khi đủ.",
   "tut.mystery.title": "Ngọc ẩn",
   "tut.mystery.top": "Bóng trắng/mờ đang che màu. Chạm vào từng bóng mới lộ — không đổ cả lô.",
   "tut.mystery.buried": "Bóng trắng đang nằm trong lọ. Đổ lớp trên ra, rồi chạm vào từng bóng để lộ màu.",
@@ -290,6 +300,11 @@ const vi: Dict = {
 const catalogs: Record<Locale, Dict> = { en, vi };
 
 let locale: Locale = "en";
+let adFreeCopy = false;
+
+export function setAdFreeCopy(enabled: boolean): void {
+  adFreeCopy = enabled;
+}
 
 export function getLocale(): Locale {
   return locale;
@@ -302,6 +317,7 @@ export function setLocale(next: Locale): void {
 
 export function t(key: string, vars?: Record<string, string | number>): string {
   const table = catalogs[locale] ?? en;
+  if (adFreeCopy && table[`${key}.adFree`]) key = `${key}.adFree`;
   let text = table[key] ?? en[key] ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {

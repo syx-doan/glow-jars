@@ -3,7 +3,15 @@
   "appName": "Glow Jars",
   "webDir": "dist",
   "android": {
-    "allowMixedContent": false
+    "allowMixedContent": false,
+    "includePlugins": [
+      "@capacitor-community/admob",
+      "@capacitor-firebase/analytics",
+      "@capacitor-firebase/remote-config"
+    ]
+  },
+  "ios": {
+    "includePlugins": ["@capacitor-community/admob", "@capacitor/haptics"]
   },
   "server": {
     "androidScheme": "https"
