@@ -19,7 +19,10 @@ export function setMuted(value: boolean): void {
 
 export function unlockAudio(): void {
   const c = ac();
-  if (c?.state === "suspended") void c.resume();
+  // iOS can report an interrupted context after a call or backgrounding.
+  if (c && c.state !== "running" && c.state !== "closed") {
+    void c.resume().catch(() => undefined);
+  }
 }
 
 function beep(freq: number, dur: number, type: OscillatorType, gain = 0.045): void {

@@ -16,20 +16,41 @@ export type AdKind = "interstitial" | "rewarded";
 export type AdResult = { watched: boolean };
 export type RewardOutcome = "granted" | "cancelled" | "unavailable";
 
-/** Live AdMob units unless the web bundle is built with VITE_TEST_ADS=1. */
+/** Use AdMob demo units when the web bundle is built with VITE_TEST_ADS=1. */
 export const USE_TEST_ADS = import.meta.env.VITE_TEST_ADS === "1";
 
-const LIVE = {
+const isIOS = Capacitor.getPlatform() === "ios";
+
+const ANDROID_LIVE = {
   banner: "ca-app-pub-5137687081452427/6904620930",
   rewarded: "ca-app-pub-5137687081452427/7490765711",
   interstitial: "ca-app-pub-5137687081452427/6144683005",
 };
 
-const TEST = {
+const ANDROID_TEST = {
   banner: "ca-app-pub-3940256099942544/6300978111",
   rewarded: "ca-app-pub-3940256099942544/5224354917",
   interstitial: "ca-app-pub-3940256099942544/1033173712",
 };
+
+const IOS_TEST = {
+  banner: "ca-app-pub-3940256099942544/2435281174",
+  rewarded: "ca-app-pub-3940256099942544/1712485313",
+  interstitial: "ca-app-pub-3940256099942544/4411468910",
+};
+
+const IOS_LIVE = {
+  banner: import.meta.env.VITE_IOS_ADMOB_BANNER_ID?.trim(),
+  rewarded: import.meta.env.VITE_IOS_ADMOB_REWARDED_ID?.trim(),
+  interstitial: import.meta.env.VITE_IOS_ADMOB_INTERSTITIAL_ID?.trim(),
+};
+
+const units = isIOS
+  ? (USE_TEST_ADS ? IOS_TEST : IOS_LIVE)
+  : (USE_TEST_ADS ? ANDROID_TEST : ANDROID_LIVE);
+export const adsConfigured = Boolean(units.banner && units.rewarded && units.interstitial);
+// AdMob 6 substitutes Android demo IDs for some iOS requests when isTesting is true.
+const requestTestAds = USE_TEST_ADS && !isIOS;
 
 /** Firebase Remote Config keys. Local values apply until a fetch succeeds. */
 const FLAGS = {
@@ -78,6 +99,8 @@ const numbers: Record<Num, number> = { ...NUMBERS };
 let bannerLevel: number | null = null;
 let bannerShown = false;
 let bannerBusy: Promise<void> = Promise.resolve();
+let bannerRetry = 0;
+let bannerFailures = 0;
 let privacyRequired = false;
 let active: Active | null = null;
 const slots: Record<AdKind, Slot> = {
@@ -90,12 +113,8 @@ export function bindAds(next: Host): void {
   host = next;
 }
 
-function units() {
-  return USE_TEST_ADS ? TEST : LIVE;
-}
-
 function allowed(kind: "banner" | AdKind): boolean {
-  return flags.ads_enabled && flags[`${kind}_enabled`];
+  return adsConfigured && flags.ads_enabled && flags[`${kind}_enabled`];
 }
 
 function loadPacing(): { wins: number; last: number } {
@@ -205,14 +224,22 @@ function bindFullscreenEvents(): Promise<unknown> {
 }
 
 export async function initAds(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
-  await initRemoteConfig();
+  if (!Capacitor.isNativePlatform() || !adsConfigured) return;
+  if (!isIOS || Capacitor.isPluginAvailable("FirebaseRemoteConfig")) {
+    await initRemoteConfig();
+  }
   try {
     await AdMob.initialize({ initializeForTesting: USE_TEST_ADS });
     await gatherConsent();
     await AdMob.addListener(BannerAdPluginEvents.SizeChanged, (size) => {
       setBannerInset(bannerShown ? size.height : 0);
     });
+    if (isIOS) {
+      await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
+        if (bannerShown && bannerWanted() && allowed("banner")) bannerFailures = 0;
+      });
+      await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, handleBannerFailure);
+    }
     await bindFullscreenEvents();
     nativeReady = true;
   } catch {
@@ -244,24 +271,48 @@ function syncBanner(): void {
   bannerBusy = bannerBusy.then(applyBanner, applyBanner);
 }
 
+function handleBannerFailure(): void {
+  // The iOS plugin removes its native banner view before emitting this event.
+  if (!bannerShown) return;
+  bannerShown = false;
+  setBannerInset(0);
+  if (!bannerWanted() || !nativeReady || !allowed("banner")) return;
+  bannerFailures += 1;
+  if (bannerFailures > 3) return;
+  window.clearTimeout(bannerRetry);
+  bannerRetry = window.setTimeout(() => {
+    bannerRetry = 0;
+    syncBanner();
+  }, 15000 * 2 ** (bannerFailures - 1));
+}
+
 async function applyBanner(): Promise<void> {
   const want = bannerWanted() && nativeReady && allowed("banner");
+  const adId = units.banner;
+  if (isIOS && !want) {
+    window.clearTimeout(bannerRetry);
+    bannerRetry = 0;
+    bannerFailures = 0;
+  }
   try {
-    if (want && !bannerShown) {
+    if (want && !bannerShown && adId && (!isIOS || (!bannerRetry && bannerFailures <= 3))) {
+      // iOS can emit size and failure events before the show promise resolves.
+      if (isIOS) bannerShown = true;
       await AdMob.showBanner({
-        adId: units().banner,
+        adId,
         adSize: BannerAdSize.ADAPTIVE_BANNER,
         position: BannerAdPosition.BOTTOM_CENTER,
         margin: 0,
-        isTesting: USE_TEST_ADS,
+        isTesting: requestTestAds,
       });
-      bannerShown = true;
+      if (!isIOS) bannerShown = true;
     } else if (!want && bannerShown) {
       await AdMob.removeBanner();
       bannerShown = false;
     }
   } catch {
-    bannerShown = false;
+    if (isIOS) handleBannerFailure();
+    else bannerShown = false;
   }
   if (!bannerShown) setBannerInset(0);
 }
@@ -280,11 +331,12 @@ function isLoaded(kind: AdKind): boolean {
 
 function preload(kind: AdKind): Promise<boolean> {
   const slot = slots[kind];
-  if (!nativeReady || !allowed(kind)) return Promise.resolve(false);
+  const adId = units[kind];
+  if (!nativeReady || !allowed(kind) || !adId) return Promise.resolve(false);
   if (isLoaded(kind)) return Promise.resolve(true);
   if (slot.loading) return slot.loading;
   window.clearTimeout(slot.retry);
-  const options = { adId: units()[kind], isTesting: USE_TEST_ADS };
+  const options = { adId, isTesting: requestTestAds };
   const request = kind === "interstitial" ? AdMob.prepareInterstitial(options) : AdMob.prepareRewardVideoAd(options);
   slot.loading = request
     .then(() => {
@@ -402,7 +454,7 @@ export function coinAdConfig(): { enabled: boolean; reward: number; daily: numbe
   };
 }
 
-/** When rewarded ads are switched off remotely, the reward is granted without an ad. */
+/** When rewarded ads are disabled, the reward is granted without an ad. */
 export async function showRewarded(reason: string, placement: string): Promise<RewardOutcome> {
   if (!allowed("rewarded")) return "granted";
   let outcome: RewardOutcome;

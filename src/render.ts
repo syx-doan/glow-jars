@@ -499,7 +499,7 @@ export class Board {
     this.pourAfter = after;
     return new Promise((resolve) => {
       this.pourResolve = resolve;
-      const wait = 440 + Math.max(0, move.count - 1) * 52 + 90;
+      const wait = 440 * 1.2 + Math.max(0, move.count - 1) * 52 + 90;
       const id = window.setTimeout(() => this.finishPour(gen), wait);
       this.pourTimers.push(id);
     });
@@ -801,29 +801,40 @@ export class Board {
         continue;
       }
       const t = Math.max(0, Math.min(1, raw));
-      if (t < 1) flying = true;
+      // Keep the orb visible briefly after it lands so its bounce can settle.
+      if (raw < 1.18) flying = true;
       const hex = isMystery(fly.color) ? MYSTERY_HEX : PALETTE[(orbColor(fly.color) - 1) % PALETTE.length]!;
-      if (t < 1) {
+      if (t < 1 && fx().tier !== "low") {
         ctx.save();
         if (additive) ctx.globalCompositeOperation = "lighter";
         for (let n = 1; n <= 4; n++) {
           const tt = t - n * 0.05;
           if (tt <= 0) break;
           const p = this.flyPos(fly, tt);
-          ctx.globalAlpha = 0.32 - n * 0.07;
+          ctx.globalAlpha = 0.22 - n * 0.045;
           ctx.fillStyle = hex;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, m.orb * (0.85 - n * 0.12), 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, m.orb * (0.5 - n * 0.09), 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.restore();
-      } else if (!fly.landed) {
+      }
+      if (t >= 1 && !fly.landed) {
         fly.landed = true;
         this.splash(fly.tx, fly.ty, hex, m.orb);
       }
       const p = this.flyPos(fly, t);
-      const scale = 1 + Math.sin(t * Math.PI) * 0.12;
-      this.drawOrb(p.x, p.y, fly.color, m.orb, true, now, scale, isMystery(fly.color) ? "sleep" : "happy");
+      const motion = fx().tier !== "low";
+      const stretch = motion && t < 1 ? Math.sin(t * Math.PI) * 0.08 : 0;
+      const bounce = motion && raw >= 1 && raw < 1.18
+        ? Math.sin((raw - 1) * Math.PI / 0.18) * (1.18 - raw) * 0.7
+        : 0;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (motion && t < 1) ctx.rotate(Math.sign(fly.tx - fly.sx) * Math.sin(t * Math.PI) * 0.16);
+      ctx.scale(1 - stretch + bounce, 1 + stretch - bounce);
+      this.drawOrb(0, 0, fly.color, m.orb, true, now, 1, isMystery(fly.color) ? "sleep" : "happy");
+      ctx.restore();
     }
     if (this.flies.length && !flying) this.finishPour(this.pourGen);
 
@@ -1081,7 +1092,8 @@ export class Board {
   }
 
   private flyPos(fly: Fly, t: number): { x: number; y: number } {
-    const e = easeOutCubic(t);
+    // Ease at both ends to avoid a sudden sideways jump when the orb leaves its jar.
+    const e = t * t * (3 - 2 * t);
     const span = Math.abs(fly.tx - fly.sx);
     const lift = Math.sin(t * Math.PI) * Math.min(58, span * 0.38 + 26);
     return { x: lerp(fly.sx, fly.tx, e), y: lerp(fly.sy, fly.ty, e) - lift };

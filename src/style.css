@@ -989,6 +989,10 @@ button:disabled.pressing {
   margin-top: 8px;
 }
 
+.om-coins.hidden {
+  display: none;
+}
+
 .toast {
   position: absolute;
   left: 50%;

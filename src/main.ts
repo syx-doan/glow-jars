@@ -1,4 +1,7 @@
+import { Capacitor } from "@capacitor/core";
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics";
 import {
+  adsConfigured,
   bindAds,
   coinAdConfig,
   doubleCoinsEnabled,
@@ -36,6 +39,7 @@ import {
   applyStaticI18n,
   constellationName,
   getLocale,
+  setAdFreeCopy,
   setLocale,
   t,
   type Locale,
@@ -60,6 +64,8 @@ import {
   type PlayStats,
   type SaveData,
 } from "./types";
+
+setAdFreeCopy(!adsConfigured);
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -107,7 +113,15 @@ function showScreen(name: keyof typeof screens): void {
 }
 
 function haptic(ms: number | number[] = 12): void {
-  if (save.haptic && navigator.vibrate) navigator.vibrate(ms);
+  if (!save.haptic) return;
+  if (Capacitor.getPlatform() === "ios") {
+    const feedback = Array.isArray(ms)
+      ? Haptics.notification({ type: NotificationType.Success })
+      : Haptics.impact({ style: ms >= 18 ? ImpactStyle.Medium : ImpactStyle.Light });
+    void feedback.catch(() => undefined);
+  } else if (navigator.vibrate) {
+    navigator.vibrate(ms);
+  }
 }
 
 function screenFlash(color: string): void {
@@ -193,7 +207,8 @@ function refreshToolCosts(): void {
   for (const tool of ["hint", "jar", "moves"] as const) {
     const id = `cost-${tool}`;
     if (save.coins >= PRICE[tool]) setCost(id, String(PRICE[tool]), "coin");
-    else setCost(id, "▶", "ad");
+    else if (adsConfigured) setCost(id, "▶", "ad");
+    else setCost(id, "0", "");
   }
 }
 
@@ -535,8 +550,11 @@ function openOutOfMoves(): void {
   selected = null;
   board.setSelected(null);
   const coinsBtn = $("btn-om-coins") as HTMLButtonElement;
+  const canPay = save.coins >= PRICE.moves;
+  coinsBtn.classList.toggle("hidden", !adsConfigured && !canPay);
+  $("btn-om-ad").classList.toggle("hidden", !adsConfigured && canPay);
   coinsBtn.textContent = t("omCoins", { n: PRICE.moves });
-  coinsBtn.disabled = save.coins < PRICE.moves;
+  coinsBtn.disabled = !canPay;
   outModal.classList.remove("hidden");
   track("out_of_moves", { level: levelId });
 }
